@@ -586,6 +586,22 @@ computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENO
 
 }
 
+/*
+  This estimates the mixture fraction. Currently only a single-threaded version is available (
+  though multithreading isn't too hard w/ this problem, it just may not save much time).
+
+  The short of it, this does a grid search over possible mixture fractions (mf) is conducted, and
+  the mf that provides the highest likelihood (assuming independence in sites and a total sampling of possible pairs of genotypes)
+  is returned.
+
+  Note that even if the mf is "known", it is known with variance (eg, you think it's a 50/50 mixture, but in truth its not)
+  Also, even if it is truly a 50/50 mixture, if one of the samples is more degraded, then based on the coverage at a site
+  it is not (in terms of SNPs) a 50/50 mixture.
+
+  The MF estimator works either in the presence of 1 known genotype (which may be the major or the minor; this restricts the possible pairs of genos)
+  or if both genotypes is unknown (considers all pairs of biallelic genos)
+
+ */
 
 double
 estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Options *opt) {
@@ -594,6 +610,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
   int i,j, gridSize = opt->ngrid;
   double mf; // the proposed mixture fraction
   double error= pow(10, opt->minBaseQuality/-10.0);
+
 
   double loglike;
   double bestLike=-1;
@@ -620,13 +637,9 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     getGenoIterators("AB", EITHER, ABindexes);
     getGenoIterators("BB", EITHER, BBindexes);
 
-    /*
-    for (int i = 0; i < nIndexes; ++i) {
-      cout << AAindexes[i] << "\t" << ABindexes[i] << "\t" << BBindexes[i] << endl;
-
-    }
-    exit(1);
-    */
+  } else { // both unknowns, then the mixture fraction only meaningfully varies from 0-0.5 (or from 0.5-1, take you pick!)
+    gridSize /=2;
+    gridSizeD = gridSize;
   }
   
   // uniformly select points in the range [0,1] for the mixture fraction
