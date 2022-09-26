@@ -3,8 +3,8 @@
 <br>
 1. **Input your mixed sample (BAM file format)
 2. **Provide a B/VCF file. 
-     ** This may be a "site only" VCF file (the sample is treated as having two unknown contributors)
-	 ** Or it may have genotypes (and you can select which individual is a known contributor)
+     * This may be a "site only" VCF file (the sample is treated as having two unknown contributors)
+	 * Or it may have genotypes (and you can select which individual is a known contributor)
 
 <br>
 <br>
