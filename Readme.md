@@ -1,9 +1,9 @@
 # Biallelic mixture deconvolution
-[Genetic genealogy](https://en.wikipedia.org/wiki/Genetic_genealogy) typically considers [SNPs](https://en.wikipedia.org/wiki/Single-nucleotide_polymorphism), often by microarray or whole genome sequencing (WGS). If your sample is a mixture, you will need a tool like *demixtify* to deconvolve your sample. The tool works by: <br>
+[Genetic genealogy](https://en.wikipedia.org/wiki/Genetic_genealogy) typically considers [SNPs](https://en.wikipedia.org/wiki/Single-nucleotide_polymorphism), often by microarray or whole genome sequencing (WGS). If your sample is a mixture, you will need a tool like *demixtify* to deconvolve your sample. The takes the following information: <br>
 <br>
-1. **Input your mixed sample (BAM file format)
-2. **Provide a B/VCF file. 
-     * This may be a "site only" VCF file (the sample is treated as having two unknown contributors)
+1. * Input your mixed sample (processed BAM file format)
+2. * Provide a B/VCF file. 
+     * This may be a "sites only" VCF file (the sample is treated as having two unknown contributors)
 	 * Or it may have genotypes (and you can select which individual is a known contributor)
 
 <br>
