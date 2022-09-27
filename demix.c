@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <set>
 #include <threads.h>
+#include <iomanip>
 
 // To future travelers:
 // this presumes that there is a local version of htslib in the PWD
@@ -25,6 +26,8 @@
 #define DEFAULT_MIN_BASEQ 20
 #define DEFAULT_MIN_READLEN 30
 #define DEFAULT_NGRID 100
+
+const char* DEPTH_TAG = "DP";
 
 // used to exclude reads on the basis of the following:
 #define DEFAULT_READ_FILTER (BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY)
@@ -52,9 +55,9 @@ die(const char *arg0, const char *extra) {
   }
   
   cerr << "Usage " << endl <<
-    arg0 << " -b bamFile -d bedFile OR" << endl <<
-    arg0 << " -b bamFile -v (b/v)cfFile OR" << endl <<
-    arg0 << " -b bamFile -r UCSC-style-region -1 allele1 -2 allele2" << endl <<
+    arg0 << " -b/-V bamFile/vcffile -d bedFile OR" << endl <<
+    arg0 << " -b/-V bamFile/vcffile -v (b/v)cfFile OR" << endl <<
+    arg0 << " -b/-V bamFile/vcffile -r UCSC-style-region -1 allele1 -2 allele2" << endl <<
     
     "Options " << endl <<
 
@@ -70,7 +73,7 @@ die(const char *arg0, const char *extra) {
     "\t-q base_quality (minimum base quality). Default: " << DEFAULT_MIN_BASEQ << endl <<
     "\t-L length (minimum read length). Default: " << DEFAULT_MIN_READLEN << endl <<
     "\t-f read_filter (excludes reads according to SAM read filter flags). Default: 0x" << std::hex << DEFAULT_READ_FILTER << endl <<
-    "\t-g read_include_filter (includes reads if all filters are met). Default: 0x" << std::hex << DEFAULT_READ_INCLUDE_FILTER  << endl << 
+    "\t-I read_include_filter (includes reads if all filters are met). Default: 0x" << std::hex << DEFAULT_READ_INCLUDE_FILTER  << endl << 
     "\t-r region (genomic region, UCSC-style)" << endl <<
     "\t-1 allele1 (for -r, the first allele)" << endl <<
     "\t-2 allele2 (for -r, the second allele)" << endl << endl <<
@@ -98,7 +101,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.minReadLength=DEFAULT_MIN_READLEN;
 	opt.outVCF="-";
 	opt.knowns=0;
-	
+	opt.mixedVcf=NULL;
 	opt.filterIndelAdjacent=true;
 	opt.help=false;
 	opt.parseVcf=false;
@@ -146,7 +149,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      opt.minReadLength = max(atoi(argv[i]), 0);
 	    } else if (flag == 'f') {
 	      opt.filter = atoi(argv[i]);
-	    } else if (flag == 'g') {
+	    } else if (flag == 'I') {
 	      opt.include_filter = atoi(argv[i]);
 	    } else if (flag == 'F') {
 	      opt.mixtureFraction = max(atof(argv[i]), 0.0000001);
@@ -160,8 +163,6 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      opt.outVCF = string(argv[i]);
 	    } else if (flag == 'b') {
 	      opt.bamFilename = argv[i];
-	    } else if (flag == 'g') {
-	      opt.ngrid = max(atoi(argv[i]), 0);
 	    } else if (flag == 'd') {
 	      opt.bedFilename = argv[i];
 	    } else if (flag == 'c') {
@@ -191,8 +192,10 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	}
 	
 	if (opt.bamFilename==NULL) {
-	  ++errors;
-	  cerr << "No bam file was specified... I kinda need one of those!" << endl;
+	  if (opt.bedFilename == NULL) { // if run using simulated data, the bed file can provide everything...
+	    ++errors;
+	    cerr << "No bam file was specified... I kinda need one of those!" << endl;
+	  }
 	}
 	
 	if (opt.bedFilename==NULL) {
@@ -218,7 +221,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	}
 	
 	
-	
+
 	if (errors)
 	  return false;
 
@@ -638,8 +641,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     getGenoIterators("BB", EITHER, BBindexes);
 
   } else { // both unknowns, then the mixture fraction only meaningfully varies from 0-0.5 (or from 0.5-1, take you pick!)
-    gridSize /=2;
-    gridSizeD = gridSize;
+    gridSizeD += gridSizeD;
   }
   
   // uniformly select points in the range [0,1] for the mixture fraction
@@ -678,7 +680,16 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
       }
     }
 
-    cout << mf << "\t" << loglike << endl;
+    // low-rent solution to printing out better precision on the grid-search results
+    string outstring = "%.3f\t%0.5f\n";
+    int precision = ceil(log10(haveKnowns ? opt->ngrid : opt->ngrid*2));
+    if (precision < 0)
+      precision =2;
+    else if (precision > 9)
+      precision=9;
+    
+    outstring[2] = '0' + precision;
+    printf(outstring.c_str(), mf, loglike);
     
     if (i==0 || bestLike < loglike) {
       bestLike=loglike;
@@ -792,19 +803,41 @@ main(int argc, char **argv) {
     
   } else {
     vector<Locus> loci;
-
+    BaseCounter *results=NULL;
+    vector<BaseCounter> tmpResults;
+    
     if (opt.parseVcf) {
       if (NULL == (header= (bcf_hdr_t*)readVcf(opt.bedFilename, loci, opt.knowns, NULL)) ) {
 	die(argv[0], "Failed to parse the vcf file ... ");
       }
-    } else if (! readBed(opt.bedFilename, loci)) {
-      die(argv[0], "Failed to parse the bed file ... ");
+      
+      results = new BaseCounter[ loci.size() ];
+      
+    } else {
+
+      if (! readBed(opt.bedFilename, loci, tmpResults)) 
+	die(argv[0], "Failed to parse the bed file ... ");
+
+      if (tmpResults.size()) {
+
+	// may happen if some records have allele counts and others do not
+	if (tmpResults.size() != loci.size()) {
+	  die(argv[0], "Your bed file is malformed...");
+	}
+	
+	results=tmpResults.data(); //note: no need to free.
+	
+	opt.numThreads=0; // kludge, but we use multithreading to parse the bam file.
+	// if I'm here, it means that a vector of counts was added to the bed file; hence no threads!
+      }
+      
     }
 
-    BaseCounter *results = new BaseCounter[ loci.size() ];
+    
 
     if (opt.numThreads==1) {
       int i=0;
+      
       // borrowed from: https://dearxxj.github.io/post/5/
       // non-threaed version; open the bam file in main
       bam1_t *b = bam_init1();
@@ -837,7 +870,7 @@ main(int argc, char **argv) {
 
 
       
-    } else {
+    } else if (opt.numThreads>1) {
       // multithreaded version; each
       // thread has its own file handle
       // (bam IO has state)
@@ -860,17 +893,18 @@ main(int argc, char **argv) {
       
       delete[] threads;
       delete[] helpers;
-      // TODO (?) multithreaded version. (maybe).
-
     }
 
+    
     double mf_hat = estimateMF_1Thread(results, &loci, &opt);
     //    deconvolveSample(    
     if (opt.outCounts != NULL) {
       writeCounts(opt.outCounts, &loci, results, mf_hat, &opt);
     }
-
-    delete[] results;
+    
+    if (!tmpResults.size())
+      delete[] results;
+    
   }
 
   // if writing a BCF/VCF, I need to recycle the header
@@ -912,6 +946,7 @@ readVcf(char *fname, vector<Locus> &loci, int knownIndex, BaseCounter *results) 
   bool hasKnown=knownIndex>0;
   if (hasKnown) {
     knownIndex=(knownIndex-1)*2; // genotypes stored as flattened 2D arrays (TODO, double check w/ multisample BCF)
+    // gts at knownIndex and knownIndex +1 
   }
   
   //save for each vcf record
@@ -961,11 +996,12 @@ readVcf(char *fname, vector<Locus> &loci, int knownIndex, BaseCounter *results) 
 	if (a1 < 0 || a2 < 0)
 	  continue;
 
-	if (a1+a2==0) {
+	a1 = a1 + a2;
+	if (a1==0) {
 	  loc.genotypecall=AA;
-	} else if (a1 + a2 == 1) {
+	} else if (a1 == 1) {
 	  loc.genotypecall=AB;
-	} else if (a1 + a2 == 2) {
+	} else if (a1 == 2) {
 	  loc.genotypecall=BB;
 	} else {
 	  cerr << "Parse error for snp at position: " << loc.region << endl;
@@ -995,7 +1031,7 @@ readVcf(char *fname, vector<Locus> &loci, int knownIndex, BaseCounter *results) 
 }
 
 bool
-readBed(char *filename, vector<Locus> &loci) {
+readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
   ifstream bedFile;
   string line;
   
@@ -1007,13 +1043,16 @@ readBed(char *filename, vector<Locus> &loci) {
   bool printWarn=false;
   
   while (getline(bedFile, line)) {
+    if (line[0] == '#') // bed files may have a header; headers must have a #. technically these can be anywhere in the file, but, well, laziness :)
+      continue;
+    
     stringstream ss(line);
     vector<std::string> records;
     string tmp;
     while(getline(ss, tmp, '\t')) {
       records.push_back(tmp);
     }
-    if (records.size() >0 && records.size() != 5) {
+    if (records.size() >0 && records.size() < 5) {
       cerr << "Error on line: " << endl << line << endl;
       ret=false;
       break;
@@ -1055,6 +1094,16 @@ readBed(char *filename, vector<Locus> &loci) {
     } else if (loc.allele1==loc.allele2) {
       cerr << "Alleles may not be the same... " << endl << line << endl;
       continue;
+    }
+
+    // it's inelegant, but for testing purposes it can be nice to include raw counts
+    // note that data written this way cannot be exported to the VCF file format (eg, the genome version is not known)
+    if (records.size() > 6) {
+      BaseCounter foo;
+      foo.refCount=atoi(records[5].c_str());
+      foo.altCount=atoi(records[6].c_str());
+      foo.otherCount=foo.badCount=0;
+      bc.push_back(foo);
     }
     
     loci.push_back(loc);

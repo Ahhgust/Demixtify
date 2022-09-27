@@ -37,6 +37,7 @@ typedef struct {
   double mixtureFraction; // can be passed in, or estimated by ML
   bool filterIndelAdjacent;
   bool help;
+  const char *mixedVcf;
   char *bamFilename;
   char *bedFilename;
   char *outCounts;
@@ -106,7 +107,7 @@ bool summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, 
 // if it is, then just the genotypes are extracted.
 // otherwise the DP field is used to populate the BaseCounter object
 void *readVcf(char *fname, std::vector<Locus> &loci, int knownIndex, BaseCounter *results);
-bool readBed(char *filename, std::vector<Locus> &loci);
+bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> &tmpResults);
 
 // writes the counts data structure to file (plain text)
 // and it writes the likelihoods...
