@@ -27,14 +27,16 @@
 #define DEFAULT_MIN_READLEN 30
 #define DEFAULT_NGRID 100
 
-const char* DEPTH_TAG = "DP";
-
 // used to exclude reads on the basis of the following:
 #define DEFAULT_READ_FILTER (BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP | BAM_FSUPPLEMENTARY)
 
 // additionally, reads also must have ALL the following bitfields set
 // (ie, must not trip the above filters, and must also be a proper pair)
 #define DEFAULT_READ_INCLUDE_FILTER (BAM_FPROPER_PAIR)
+
+// default threshold
+// only consider sites in which are are at least 90% confident that it is segregating
+#define DEFAULT_MIN_PROB_SEG 0.90
 
 using namespace std;
 
@@ -66,6 +68,7 @@ die(const char *arg0, const char *extra) {
     "\t-o outFile (writes deconvolved data in the V/BCF file format; defaults to standard output)" << endl <<
     "\t-i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites" << endl <<
     "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
+    "\t-p probSeg (Only consider sites where we are x% confident it is segregating). Default: " << DEFAULT_MIN_PROB_SEG  << endl <<
     "\t-k knownIndex (from the VCF file, the 1-based index of the known contributor; defaults to 0 (no known contributor))" << endl<<
     "\t-t nthreads (number of threads to use. Defaults to 1) " << endl <<    
     "\t-m mapping_quality (minimum mapping quality). Default: " << DEFAULT_MIN_MAPQ <<  endl <<
@@ -101,6 +104,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.minReadLength=DEFAULT_MIN_READLEN;
 	opt.outVCF="-";
 	opt.knowns=0;
+	opt.minProbSeg=DEFAULT_MIN_PROB_SEG;
 	opt.mixedVcf=NULL;
 	opt.filterIndelAdjacent=true;
 	opt.help=false;
@@ -153,6 +157,8 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      opt.include_filter = atoi(argv[i]);
 	    } else if (flag == 'F') {
 	      opt.mixtureFraction = max(atof(argv[i]), 0.0000001);
+	    } else if (flag == 'p') {
+	      opt.minProbSeg = max(atof(argv[i]), 0.);
 	    } else if (flag == 't') {
 	      opt.numThreads = max(atoi(argv[i]), 1);
 	    } else if (flag == 'g') {
@@ -312,6 +318,22 @@ getGenoIterators(const std::string &known, char type, int *itr) {
     return N_GENOS;
   }
   return -1;
+}
+
+/*
+  Returns the log probability that the site is segregating.
+  ie, the prob(AAAA OR BBBB)
+
+ */
+
+double
+getProbSeg2Unknowns(double *genolikes, double totalLL) {
+
+  // logsumexp applied to a pair
+  double maxL = *genolikes;
+  double otherL = genolikes[ N_GENOS-1];
+  double num = exp(maxL) + exp(otherL); // likelihood of being homozygous identical
+  return 1.-num/exp(totalLL); 
 }
 
 // converts an internal representation of a BAM sequence to ASCII; this function is just for demonstration purposes...
@@ -606,23 +628,28 @@ computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENO
 
  */
 
+// TODO: outline the likelihood estimate; keep genotypes in memory;
 double
 estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Options *opt) {
 
   int nLoci = (int) loci->size();
-  int i,j, gridSize = opt->ngrid;
+  int i,j,k, gridSize = opt->ngrid;
   double mf; // the proposed mixture fraction
   double error= pow(10, opt->minBaseQuality/-10.0);
 
 
+  // convert from probability of segregating to probability of
+  // being homozygous identical
+  double logSegThreshold=log(1.0 - opt->minProbSeg);
+  
   double loglike;
   double bestLike=-1;
   double bestMF=-1;
+  double bestMFI=0; // the index of the best mixture fraction
   double gridSizeD=gridSize;
   
   double aweights[N_GENOS];
-  //auto genolikes = new double[ nLoci ][N_GENOS];
-  double genolikes[N_GENOS];
+  double *genolikes;
   const BaseCounter *c;
   std::vector<Locus>::iterator it; 
 
@@ -631,22 +658,48 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
   int BBindexes[N_GENOS];
   int *idx;
   int nIndexes=0;
-  
+  int nIncluded=nLoci;
+  double logProbHom, totalLL;
   bool haveKnowns = opt->knowns>0;
 
+    // if the mixture fraction is specified, the the variable mf is defined
+  // and the size of the grid is set to 1.
+  if (opt->mixtureFraction>=0.0) {
+    gridSize=0; // note that we search gridSize+1, so this ensures loops happen once.
+    gridSizeD=1.;
+  }
+  
+  
+  auto genoTable = new double [nLoci * (gridSize+1) ][N_GENOS];
+  // marginal (log) likelihood of each genotype for each locus, across mixture fractions
+  auto marginalGenos = new double[nLoci][N_GENOS];
+  auto marginalInclude = new bool[nLoci]; // threshold on mariginalGenos (p(AAAA) + p(BBBB) < homIdenticalThreshold)
+  
+  // the marginal (log) likelihood of each mixture fraction
+  // only considering sites with sufficient evidence of being polymorphic
+  // (ie, not AAAA or BBBB)
+  // note that including (a bunch of) invariant sites biases the mixture fraction down.
+  // thus estimating the marginalGenos happens first.
+  auto marginalMF = new double[ gridSize+1];
+  
   if (haveKnowns) {
-    // nIndexes==5 in all cases.
-    nIndexes = getGenoIterators("AA", EITHER, AAindexes);
-    getGenoIterators("AB", EITHER, ABindexes);
-    getGenoIterators("BB", EITHER, BBindexes);
+    // nIndexes==3 in all cases.
+    nIndexes = getGenoIterators("AA", MINOR, AAindexes);
+    getGenoIterators("AB", MINOR, ABindexes);
+    getGenoIterators("BB", MINOR, BBindexes);
 
   } else { // both unknowns, then the mixture fraction only meaningfully varies from 0-0.5 (or from 0.5-1, take you pick!)
     gridSizeD += gridSizeD;
   }
-  
+
   // uniformly select points in the range [0,1] for the mixture fraction
   for (i = 0; i <= gridSize; ++i) {
-    mf = i/gridSizeD;
+
+    if (opt->mixtureFraction>= 0.0)  // happens once; breaks at end of loop
+      mf = opt->mixtureFraction;
+    else // actual looping...
+      mf = i/gridSizeD;
+    
     c = counts;
 
     loglike=0.;
@@ -654,11 +707,70 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     // convert the 9 genotype calls with the proposed mixture fraction
     // to get the fraction of reads expected of an "A" allele (a continuous "genotype")
     genotypesToAlleleWeights( mf, aweights);
-    it = loci->begin(); 
-    for (j=0; j < nLoci; ++j, ++c, ++it) {
-      
+    
+    for (j=0; j < nLoci; ++j, ++c) {      
       if (c->badCount !=SKIP_SNP) {
+	genolikes = genoTable[j + (i*nLoci)];
 	computeLikesWithM(c->refCount, c->altCount, aweights, error, genolikes);
+	if (!i) {
+	  memcpy(&(marginalGenos[j]), genolikes, N_GENOS*sizeof(double));
+	} else {
+
+	  for(k=0; k < N_GENOS; ++k) {
+	    marginalGenos[j][k] = LOG_SUM_EXP_PAIR(marginalGenos[j][k], genolikes[k]);
+	  }
+	}
+      }
+    }
+  }
+
+
+  for (j=0; j < nLoci; ++j) {
+    marginalInclude[j]=true;
+
+    // TODO: Handle case of 1 known contributor!
+    
+    // note, for this to make sense, the likelihoods at a site need to sum to 1.
+    // this is the homozygous filter. Let's try including "heterozygotes" too
+    //logProbHom=LOG_SUM_EXP_PAIR( marginalGenos[j][0], marginalGenos[j][N_GENOS-1]);
+    // indexes associated with 3As and 1 B (or vice versa).
+    int toInclude[]={0,2,4,6,8};
+    logProbHom = log_sum_exp_with_knowns(marginalGenos[j], toInclude, 5, false);
+    
+    totalLL = log_sum_exp(marginalGenos[j], false);   
+    logProbHom -= totalLL;
+    if (logProbHom > logSegThreshold ) {
+      marginalInclude[j]=false;
+      --nIncluded;
+    }
+    //    cout << (j+1) << "\t" << marginalInclude[j] << endl;
+  }
+  //  cout << opt->minProbSeg << endl;
+  // exit(1);
+  
+  delete[] marginalGenos;
+
+  for (i = 0; i <= gridSize; ++i) {
+    loglike=0.;
+    
+    if (opt->mixtureFraction>= 0.0)  // happens once; breaks at end of loop
+      mf = opt->mixtureFraction;
+    else // actual looping...
+      mf = i/gridSizeD;
+
+    it = loci->begin();
+    for (j=0; j < nLoci; ++j, ++it) {
+      
+      if (marginalInclude[j]) { /// sufficient evidence to say that the site is polymorphic
+	
+	genolikes = genoTable[j + (i*nLoci)];
+	/*
+	for (k=0; k < 9; ++k) {
+	  cout << "\t" << genolikes[k];
+	}
+	cout << "\t" << log_sum_exp(genolikes, false) << endl;
+	*/
+	
 	if (haveKnowns) {
 	  if (it->genotypecall==NOCALL)
 	    continue;
@@ -673,12 +785,29 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
 	    exit(1);
 	  }
 
-	  loglike += log_sum_exp_with_knowns(genolikes, idx, nIndexes);
-	  
-	} else 
-	  loglike += log_sum_exp(genolikes);
+	  loglike += log_sum_exp_with_knowns(genolikes, idx, nIndexes, false);
+
+	} else {
+	  loglike += log_sum_exp(genolikes, false);
+	}
+	
       }
     }
+
+
+    marginalMF[i]=loglike;
+    
+    if (i==0 || bestLike < loglike) {
+      bestLike=loglike;
+      bestMFI=i;
+      bestMF=mf;
+    }
+    //cout << mf << "\t" << loglike << endl;
+    printf("mf\t%0.4f\t%0.9f\n", mf, loglike);
+  }
+  
+  printf("nsnps\t%f\t%d\n", opt->minProbSeg, nIncluded);
+  /*
 
     // low-rent solution to printing out better precision on the grid-search results
     string outstring = "%.3f\t%0.5f\n";
@@ -696,9 +825,15 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
       bestMF=mf;
     }
 
+    // mixture fraction is pre-set
+    if (opt->mixtureFraction>= 0.0)
+      break;
+
   }
-  
-  
+    */
+
+  delete[] genoTable;
+  delete[] marginalMF;
   return bestMF;
 }
 
@@ -706,18 +841,22 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
 // applied to the genos;
 // used to get the log likelihood of P(D|mf) = product over SNP( sum over genotypes ( a.count,c.count|mf, g))
 inline double
-log_sum_exp(double *genolikes) {
+log_sum_exp(double *genolikes, bool justmax) {
   int i;
   double s=0.;
   double max = *genolikes;
   double *g = genolikes+1;
+
 
   for (i=1; i < N_GENOS; ++i, ++g) {
     if (*g > max)
       max = *g;
 
   }
-
+  
+  if (justmax)
+    return max;
+  
   for (i=0; i < N_GENOS; ++i, ++genolikes) 
     s += exp(*genolikes-max);
 
@@ -726,20 +865,25 @@ log_sum_exp(double *genolikes) {
   
 }
 
+
+
 // same as log_sum_exp
 // however only the indexes in *knowns are traversed (all ngenos of them)
 inline double
-log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos) {
+log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos, bool justmax) {
   int i, *k=knowns+1;
   double s=0.;
   double max = genolikes[ *knowns ];
 
+
   for (i=1; i < ngenos; ++i, ++k) {
     if (genolikes[ *k ] > max)
       max = genolikes[ *k ];
-
   }
-
+  
+  if (justmax)
+    return max;
+  
   k=knowns;
 
   for (i=0; i < ngenos; ++i, ++k) 
@@ -826,9 +970,13 @@ main(int argc, char **argv) {
 	}
 	
 	results=tmpResults.data(); //note: no need to free.
-	
 	opt.numThreads=0; // kludge, but we use multithreading to parse the bam file.
 	// if I'm here, it means that a vector of counts was added to the bed file; hence no threads!
+
+	if (loci[0].genotypecall != NOCALL)
+	  opt.knowns=1; // treated as a flag, and an index to grab out of the vcf file
+	// if we're here, there's no VCF file to parse...
+	
       }
       
     }
@@ -1052,7 +1200,11 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
     while(getline(ss, tmp, '\t')) {
       records.push_back(tmp);
     }
-    if (records.size() >0 && records.size() < 5) {
+
+    if (!records.size()) // blank lines are A okay
+      continue;
+    
+    if (records.size() < 5) {
       cerr << "Error on line: " << endl << line << endl;
       ret=false;
       break;
@@ -1060,7 +1212,7 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
 		
     int startPosition = atoi(records[1].c_str()) + 1;
     int stopPosition=atoi(records[2].c_str());
-    if (startPosition==1 || startPosition>stopPosition) {
+    if (startPosition<=1 || startPosition>stopPosition) {
       cerr << "Invalid positions in line: " << line << endl;
       ret = false;
       break;
@@ -1104,6 +1256,16 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
       foo.altCount=atoi(records[6].c_str());
       foo.otherCount=foo.badCount=0;
       bc.push_back(foo);
+    }
+    // assumes a 0/1/2 encoding for one of the "known" genotypes
+    if (records.size() > 7) {
+      // we encode using two bits, 0 meaning I don't know, then 1, 2, 3 for AA, AB, BB
+      // the simulation program uses 1.5 bits (0,1,2)==(AA,AB,BB). hence the +1
+      loc.genotypecall = 1 + atoi(records[7].c_str());
+      if (loc.genotypecall < 0 || loc.genotypecall > BB) {
+	cerr << "Invalid genotype on line" << endl << line << endl << records[7] << endl;
+	return false;
+      }
     }
     
     loci.push_back(loc);

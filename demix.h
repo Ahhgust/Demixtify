@@ -35,6 +35,7 @@ typedef struct {
   uint32_t filter; // SAM_FLAG filter
   uint32_t include_filter; // SAM_FLAG filter
   double mixtureFraction; // can be passed in, or estimated by ML
+  double minProbSeg;
   bool filterIndelAdjacent;
   bool help;
   const char *mixedVcf;
@@ -42,7 +43,7 @@ typedef struct {
   char *bedFilename;
   char *outCounts;
   std::string outVCF;
-  bool parseVcf; // the "bed" file may either be .bed or .vcf      
+  bool parseVcf; // the "bed" file may either be .bed or .vcf
 } Options;
 
 typedef struct {
@@ -72,6 +73,7 @@ std::string POSSIBLE_GENOS[] = {
 			   "BBAB",
 			   "BBBB"
 };
+
 
 
 #define N_GENOS 9
@@ -128,6 +130,11 @@ bool validNuc(char c);
 // formula 5 from Crysup and Woerner
 #define LOG_LIKE(NC, NT, w, e) (NC*log(w*(1.-e) + (1.-w)*e/3.0) + NT*log( (1.-w)*(1.-e)+w*(e/3.))  )
 
+// log_sum_exp on a pair of log likelihoods (ie, gives log of sum of probabilities)
+// note the 1 is for taking the exp(max-max), which happens implicitly
+#define LOG_SUM_EXP_PAIR(L1, L2) ( (L1)>(L2) ? log( exp((L2)-(L1)) + 1. )+(L1) : log( exp((L1)-(L2)) + 1. )+(L2) )
+#define LOG_SUM_EXP_PAIR_NAIVE(L1, L2) ( log(exp(L1)+exp(L2)))
+
 // converts all proposed genotypes  e.g., (AAAB == AA individual 1, AB indivual 2)
 // and the propsed mixture fraction (eg, mf==70% of reads come from individual 1)
 // into the expected proportion of reads associated with an "A" allele
@@ -140,13 +147,13 @@ void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N
 // log-sum-exp trick applied to the genotype likelihoods
 // gives the log( sum (likelihoods)) when the likelihoods are in log-space
 // 
-inline double log_sum_exp(double *genolikes);
+inline double log_sum_exp(double *genolikes, bool justmax);
 
 // same as above, but a vector of indexes (knowns, corresponding to 2-person genotypes
 // which are consistent with some KNOWN genotype) can be used to compute the LL
 // considering SOME of the indexes
 inline double
-log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos);
+log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos, bool justmax);
 // perl-inspired print to stderr and exit. extra may be NULL
 void die(const char *arg0, const char *extra);
 
