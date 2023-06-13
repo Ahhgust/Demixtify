@@ -4,19 +4,25 @@
 #include <limits.h>
 #include <vector>
 #include <math.h>
-
+#include <algorithm>
 
 typedef struct {
   std::string region;
   char allele1;
   char allele2;
   char genotypecall;
+  float af; // population allele frequency; defaults to DEFAULT_AF
 } Locus;
 
 #define NOCALL 0
 #define AA 1
 #define AB 2
 #define BB 3
+
+#define DEFAULT_AF -1
+#define MIN_AF 0.0001
+
+const char* DEFAULT_AF_TAG="AF";
 
 // note: KNOWN_GENOS[AB] == "AB"
 std::string KNOWN_GENOS[] = {
@@ -28,6 +34,7 @@ std::string KNOWN_GENOS[] = {
 typedef struct {
   unsigned minMapQuality;
   unsigned minBaseQuality;
+  unsigned maxBaseQuality;
   unsigned ngrid; // parameter sweep; how fine?
   int minReadLength; // bam spec. lens are signed ints
   int numThreads;
@@ -35,7 +42,7 @@ typedef struct {
   uint32_t filter; // SAM_FLAG filter
   uint32_t include_filter; // SAM_FLAG filter
   double mixtureFraction; // can be passed in, or estimated by ML
-  double minProbSeg;
+  double downsampleFraction; //
   bool filterIndelAdjacent;
   bool help;
   const char *mixedVcf;
@@ -43,6 +50,7 @@ typedef struct {
   char *bedFilename;
   char *outCounts;
   std::string outVCF;
+  const char* AFtag;
   bool parseVcf; // the "bed" file may either be .bed or .vcf
 } Options;
 
@@ -89,6 +97,8 @@ int getGenoIterators(const std::string &known, char type, int *itr);
 #define MINOR 2
 #define ALL   3
 
+#define GENOPROB(c, a) (c[0]=='A' && c[1]=='A' ? (1-a)*(1-a) : (c[0]=='B' && c[1]=='B' ? (a)*(a) : 2*(1-a)*a))
+
 
 // Meat and potatoes!
 // this takes in a single locus and fills out a BaseCounter struct
@@ -108,7 +118,7 @@ bool summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, 
 // Note that *results MAY BE NULL
 // if it is, then just the genotypes are extracted.
 // otherwise the DP field is used to populate the BaseCounter object
-void *readVcf(char *fname, std::vector<Locus> &loci, int knownIndex, BaseCounter *results);
+void *readVcf(char *fname, std::vector<Locus> &loci, int knownIndex, BaseCounter *results, const char* AFtag);
 bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> &tmpResults);
 
 // writes the counts data structure to file (plain text)
@@ -142,7 +152,7 @@ bool validNuc(char c);
 void genotypesToAlleleWeights(double mf, double *w);
 
 // computes the 9 likelihoods associated with a pair of counts on A and B alleles
-void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS]);
+void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq);
 
 // log-sum-exp trick applied to the genotype likelihoods
 // gives the log( sum (likelihoods)) when the likelihoods are in log-space
