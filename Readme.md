@@ -39,5 +39,21 @@ We also provide files for mixture detection in whole exome sequencing data.<br>
 See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad"  in the name.
 
 
+## Compiling from scratch
+Hopefully this won't be necessary. But just in case:
 
+```
+git clone --recursive https://github.com/Ahhgust/Demixtify.git
+
+# Let's make htslib!
+cd Demixtify/htslib 
+autoreconf -i  # Build the configure script and install files it uses
+./configure --disable-libcurl # somewhat lazy on my part. Libcurl can be added, but I need to move away from libhts.a to the dynamic libraries. Laziness!
+make && make libhts.a # and libhts.a is the file we actually want. sooo... let's make it!
+cd ..
+
+# and let's make Demixtify!
+make && echo $?
+
+```
 

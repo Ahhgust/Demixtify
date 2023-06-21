@@ -7,10 +7,11 @@ CFLAGS=-Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer
 # taken from stack exchange!
 SYS := $(shell ${CC} -dumpmachine)
 
-
-# TODO:
-#htslib must be enabled w/o libcurl (cannot be combined with -static) :
-# ./configure --disable-libcurl
+# Here is the static compile command.
+# g++ -Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer demix.o -o demix_static -L/usr/lib64 htslib/libhts.a  -lz -lbz2 -llzma -lpthread -lm -ldeflate -static
+# Note:
+# you need static libraries of everything. Centos/rocky linux makes that annoyingly hard.
+# See: https://forums.centos.org/viewtopic.php?t=52129
 
 
 ifneq (, $(findstring mingw, $(SYS)))
