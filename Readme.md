@@ -5,6 +5,8 @@ If the sample is a mixture it is also important to know the degree; balanced mix
 At present, _Demixtify_ can be used to estimate the mixture fraction. Future versions will also (optionally) perform deconvolution.
 
 <br>
+<br>
+
 1. * Input your mixed sample
      * Processed \BAM file format
        * At a minimum, duplicates should be marked (or removed).
