@@ -13,8 +13,8 @@ At present, _Demixtify_ can be used to estimate the mixture fraction. Future ver
 2. * Provide a B/VCF file. 
      * This is a "sites only" VCF file
      * Some recommended files are found in [SupplementaryMaterial](SupplementaryMaterial)
-       * Choose hg38 ("chr" chromosome naming, likely from UCSC) OR
-       * or grch38 (no "chr"; the naming favored by ensembl)
+       * Choose [hg38](SupplementaryMaterial/hg38) ("chr" chromosome naming, likely from UCSC) OR
+       * or [grch38](SupplementaryMaterial/ (no "chr"; the naming favored by ensembl)
 	 
 
 <br>
