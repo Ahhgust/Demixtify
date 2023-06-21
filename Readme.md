@@ -27,5 +27,17 @@ Demixtify will then estimate:
 <br>
 
 
+<br>
+
+## Dependencies
+1. * htslib (any recent version; needed by demixtify)
+2. * R + tidyverse (only necessary for post-processing)
+
+## Exome sequencing
+
+We also provide files for mixture detection in whole exome sequencing data.<br>
+See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad"  in the name.
+
+
 
 
