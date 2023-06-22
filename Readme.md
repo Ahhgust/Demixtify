@@ -60,6 +60,7 @@ demix -t 4 -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3
 Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk; once that pipe is full,
 adding more threads will just make things go that much slower.
 
+See the documentation [here](MFfile.md) to see how to work with the mixture fraction estimates.
 
 <br>
 
