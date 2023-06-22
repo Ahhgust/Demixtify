@@ -26,6 +26,11 @@ Demixtify will then estimate:
     
 <br>
 
+## Exome sequencing
+
+We also provide files for mixture detection in whole exome sequencing data.<br>
+See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad"  in the name.
+
 
 <br>
 
@@ -33,20 +38,16 @@ Demixtify will then estimate:
 1. * htslib (any recent version; needed by demixtify)
 2. * R + tidyverse (only necessary for post-processing)
 
-## Exome sequencing
-
-We also provide files for mixture detection in whole exome sequencing data.<br>
-See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad"  in the name.
-
-
 ## Compiling from scratch
 Hopefully this won't be necessary. But just in case:
 
 ```
 git clone --recursive https://github.com/Ahhgust/Demixtify.git
+cd Demixtify
+git submodule update --init --recursive # adds in the tokens for htslib's codecs (whatever the heck that is!)
 
 # Let's make htslib!
-cd Demixtify/htslib 
+cd htslib 
 autoreconf -i  # Build the configure script and install files it uses
 ./configure --disable-libcurl # somewhat lazy on my part. Libcurl can be added, but I need to move away from libhts.a to the dynamic libraries. Laziness!
 make && make libhts.a # and libhts.a is the file we actually want. sooo... let's make it!
