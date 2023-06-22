@@ -14,7 +14,7 @@ At present, _Demixtify_ can be used to estimate the mixture fraction. Future ver
      * This is a "sites only" VCF file
      * Some recommended files are found in [SupplementaryMaterial](SupplementaryMaterial)
        * Choose [hg38](SupplementaryMaterial/hg38) ("chr" chromosome naming, likely from UCSC) OR
-       * or [grch38](SupplementaryMaterial/ (no "chr"; the naming favored by ensembl)
+       * or [grch38](SupplementaryMaterial/grch38) (no "chr"; the naming favored by ensembl)
 	 
 
 <br>
@@ -45,20 +45,20 @@ cp Demixtify/binaries/Nix/demix ~/bin
 
 And estimate the mixture fraction
 ```
-demix -b YOURBAM.bam -v ~/src/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
+demix -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
 ```
 _this will take a few minutes_
 
 
 
-
-Demixtify also has (limited) parallel support. The computation is rate limited (ie, it takes a few seconds to estimate the MF, and a few minutes to read the bam).
+Demixtify also has (limited) parallel support. The computation is IO bound (ie, it takes a few seconds to estimate the MF, and a few minutes to read the bam).
 You can also read the BAM file in parallel, using 4 threads for example:
 ```
-demix -t 4 -b YOURBAM.bam -v ~/src/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
+demix -t 4 -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
 ```
 
-Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk, and threading will just make that worse.
+Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk; once that pipe is full,
+adding more threads will just make things go that much slower.
 
 
 <br>
@@ -73,6 +73,8 @@ See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad
 
 ## Dependencies
 1. * htslib (any recent version; needed by demixtify)
+     * And some (mostly) standard libraries:
+       * pthreads, bzip2, zlib, libdeflate
 2. * R + tidyverse (only necessary for post-processing)
 
 ## Compiling from scratch
