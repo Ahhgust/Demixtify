@@ -23,7 +23,25 @@ Demixtify will then estimate:
 
 * The (log) likelihood of the mixture fraction (mf)
    * Over a range of values for mf
-    
+
+# Quick start (*nix systems only)
+## using static binaries
+
+Clone this repository!
+```
+git clone  https://github.com/Ahhgust/Demixtify.git
+```
+
+Put Demixtify in your bin!
+<br>
+For example:
+
+```
+cp Demixtify/binaries/Nix/demix ~/bin
+```
+
+
+
 <br>
 
 ## Exome sequencing
