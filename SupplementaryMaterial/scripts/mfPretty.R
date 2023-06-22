@@ -34,3 +34,12 @@ filter(tib, Label=='nsnps') %>%
     left_join(maxLs, by="Filename") -> maxLs
 
 cat(format_tsv(maxLs))
+
+filter(tib, Label!='nsnps') %>%
+    ggplot(aes(x=Fraction, y=LL,size=Fraction==0)) +
+    geom_point() +
+    facet_wrap(~Filename, ncol=1) +
+    theme_bw(base_size=20) -> pl
+
+ggsave("plotty.png", pl, height=3 + 10*length(args), width=12)
+
