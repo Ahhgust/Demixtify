@@ -25,14 +25,17 @@ Demixtify will then estimate:
    * Over a range of values for mf
 
 # Quick start (*nix systems only)
-## using static binaries
+## Unix system, using static binaries
 
-Clone this repository!
+Clone this repository, and put it in your _src_ directory.
 ```
+cd ~
+mkdir -p src bin
+cd src
 git clone  https://github.com/Ahhgust/Demixtify.git
 ```
 
-Put Demixtify in your bin!
+Put _Demixtify_ in your _bin_! (you may need to add $HOME/bin to your PATH.)
 <br>
 For example:
 
@@ -40,6 +43,22 @@ For example:
 cp Demixtify/binaries/Nix/demix ~/bin
 ```
 
+And estimate the mixture fraction
+```
+demix -b YOURBAM.bam -v ~/src/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
+```
+_this will take a few minutes_
+
+
+
+
+Demixtify also has (limited) parallel support. The computation is rate limited (ie, it takes a few seconds to estimate the MF, and a few minutes to read the bam).
+You can also read the BAM file in parallel, using 4 threads for example:
+```
+demix -t 4 -b YOURBAM.bam -v ~/src/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
+```
+
+Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk, and threading will just make that worse.
 
 
 <br>
@@ -57,14 +76,21 @@ See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad
 2. * R + tidyverse (only necessary for post-processing)
 
 ## Compiling from scratch
-Hopefully this won't be necessary. But just in case:
-
+Hopefully this won't be necessary.
+And in hindsight, I used c11 threads (where I should have used c++11 threads),
+which despite being part of the C11 standard, C11 threads don't have a lot of support and 
+can making compiling the code difficult on older systems (ubuntu 18.04, I'm looking at you!)
+<br>
+<br>
+If you wish to compile the code, here is what I would suggest:
 ```
 git clone --recursive https://github.com/Ahhgust/Demixtify.git
 cd Demixtify
 git submodule update --init --recursive # adds in the tokens for htslib's codecs (whatever the heck that is!)
 
 # Let's make htslib!
+#(you may be able to use a local htslib instead; just put a symlink to it in the main directory)
+
 cd htslib 
 autoreconf -i  # Build the configure script and install files it uses
 ./configure --disable-libcurl # somewhat lazy on my part. Libcurl can be added, but I need to move away from libhts.a to the dynamic libraries. Laziness!
