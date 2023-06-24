@@ -1,6 +1,8 @@
 
 CC=g++
+#CFLAGS=-Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer -DC11THREADS
 CFLAGS=-Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer
+
 #CFLAGS=-Wall -std=c++11 -ggdb3 -DDEBUG=1
 #CFLAGS=-Wall -std=c++11 -ggdb3
 

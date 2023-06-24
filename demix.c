@@ -7,7 +7,14 @@
 #include <sstream>
 #include <unordered_map>
 #include <set>
-#include <threads.h>
+
+#ifdef C11THREADS
+#include <threads.h> //c11 threads. which, as it turns out, are very poorly supported
+#else
+#include <thread> // c++11 threads, which apparently are much more standard
+#endif
+
+
 #include <iomanip>
 #include <assert.h>
 #include <random>
@@ -1035,11 +1042,14 @@ main(int argc, char **argv) {
       // (bam IO has state)
       
       // helps later on; make sure the number of threads <= the number of loci
+      // this is a definite corner case, btw. numthreads should be << numloci
       opt.numThreads = min(opt.numThreads, (int)loci.size());
-	    
-      thrd_t *threads = new thrd_t[ opt.numThreads ];
-
       SummarizeRegionHelper  *helpers = new SummarizeRegionHelper[ opt.numThreads ];
+
+      // poorly supported C11 threads here
+#ifdef C11THREADS
+
+      thrd_t *threads = new thrd_t[ opt.numThreads ];
       for (int i = 0; i < opt.numThreads; ++i) {
 	helpers[i] = {&loci, results, opt, i};
 	thrd_create(&threads[i], threadSummarizeRegion, &helpers[i]);
@@ -1051,6 +1061,22 @@ main(int argc, char **argv) {
       }
       
       delete[] threads;
+
+      // C++11 threads here
+#else
+      std::vector<std::thread> thrds;
+      for (int i = 0; i < opt.numThreads; ++i) {
+	helpers[i] = {&loci, results, opt, i};
+	thrds.push_back(
+			std::thread(&threadSummarizeRegion, (void*)&helpers[i])
+			);
+      }
+
+      for (auto& th : thrds) {
+        th.join();
+      }
+	  
+#endif
       delete[] helpers;
     }
 
