@@ -18,17 +18,13 @@ mfPretty.R will make a tab separated file with the following:
 | Filename    | The name of the parsed file |
 | Error rate  | The mean error rate, inferred using unexpected alleles |
 | NSnps       | The number of SNPs used to estimate the mixture fraction (MF) |
-| MaxLL       | The maximum log likelihood. |
-| MaxMF       | The MF that maximimizes the likelhood. This is the maximum likelhood estimate of the MF |
-| PenultLL    | The second-highest likelihood |
-| PenultMF    | The MF associated with PenultLL |
+| Mixture_MaxLL      | The maximum log likelihood; Mixture hypothesis |
+| MF          |  Mixture hypothesis; the most likely MF |
 | SingleSourceLL | The likelihood associated with a MF of 0 (i.e., a single source sample) |
+| LLR         | Log likelihood ratio; log_e(mixture/single source) |
 
+If the LLR > 0 the mixture hypothesis is more likely. If it's >6.635 (alpha=0.01, chi square, 1 degree of freedom), the mixture hypothesis is significantly more likely. The MF provides the estimated mixture fraction.
 
-Note that most of the time you just care about the _MaxMF_. In the common case, the (log) likelihood ratios are so incredibly large, you needn't worry about the significance of the LLR.
-<br>
-<br>
-Also note, the penultimate likelihoods are sometimes meaningful-- for example, if the maximum likelihood is for a single source sample (i.e., MaxMF is 0), the penultimate values are associated with a MF>0, which lets you assess a more (traditional) LR between the mixture and single source hypotheses.
 
 ## The mf.tsv file
 The raw TSV produced by demixtify is a little cumbersome. It's headerless and the last row is different from the rest.
