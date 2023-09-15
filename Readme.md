@@ -50,7 +50,6 @@ demix -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3-0_A2
 _this will take a few minutes_
 
 
-
 Demixtify also has (limited) parallel support. The computation is IO bound (ie, it takes a few seconds to estimate the MF, and a few minutes to read the bam).
 You can also read the BAM file in parallel, using 4 threads for example:
 ```
@@ -63,6 +62,47 @@ adding more threads will just make things go that much slower.
 See the documentation [here](MFfile.md) to see how to work with the mixture fraction estimates.
 
 <br>
+
+## Flags and options
+
+Demixtify has sensible defaults. Flags/options that may (reasonably) be varied are:
+```
+-t nthreads (reads in the BAM file in parallel; maximum advisable value is 5)
+```
+<br>
+<br>
+```
+-m min_mapping_quality (ignores reads with mapping quality < M; defaults to 20)
+```
+<br>
+<br>
+
+```
+-b min_base_quality (ignores reads with base quality < B; defaults to 20)
+```
+<br>
+<br>
+```
+-i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites
+```
+<br>
+<br>
+
+```
+-L min_read_length (ignores reads whose (mapped) length < L; default is 30)
+```
+<br>
+<br>
+Additional filters (using samflags)
+```
+-f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
+-I read_include_filter (includes reads if all filters are met). Default: 0x2
+```
+<br>
+See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
+<br>
+<br>
+
 
 ## Exome sequencing
 
@@ -83,6 +123,7 @@ Hopefully this won't be necessary.
 And in hindsight, I used c11 threads (where I should have used c++11 threads),
 which despite being part of the C11 standard, C11 threads don't have a lot of support and 
 can making compiling the code difficult on older systems (ubuntu 18.04, I'm looking at you!)
+*Update. I know support both c++11 threads and c11 threads. So yay for that. Older systems, as well as msys2, are now supported*
 <br>
 <br>
 If you wish to compile the code, here is what I would suggest:

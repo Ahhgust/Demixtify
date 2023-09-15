@@ -5,7 +5,7 @@ Demixtify prints (to standard out) a tabular file that can be parsed by
 
 For example, to parse the file (named mf.tsv, made by demixtify)
 ```
-Rscript  ~/src/Demixtify/scripts/mfPretty.R mf.tsv [ you can add multiple tsv files if you like ]
+Rscript  ~/src/Demixtify/SupplementaryMaterial/scripts/mfPretty.R mf.tsv [ you can add multiple tsv files if you like ]
 ```
 
 <br>

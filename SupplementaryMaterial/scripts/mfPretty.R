@@ -4,6 +4,10 @@ suppressPackageStartupMessages(require(tidyverse))
 
 args <- commandArgs(trailingOnly=TRUE)
 
+if (length(args) < 1) {
+    stop("I need 1+ tsv files from demixtify!")
+}
+
 
 readFile <- function(f) {
     t <- read_tsv(f, col_names=F, col_types=cols(), progress=FALSE) %>%
