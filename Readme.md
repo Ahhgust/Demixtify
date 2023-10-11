@@ -92,7 +92,7 @@ Additional filters (using samflags)
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
 ```
 
-See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
+Samflags are described by the Broad institute [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 <br>
 <br>
 
