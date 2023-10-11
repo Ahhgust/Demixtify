@@ -77,25 +77,22 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 ```
 -b min_base_quality (ignores reads with base quality < B; defaults to 20)
 ```
-<br>
-<br>
+
 ```
 -i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites
 ```
-<br>
-<br>
+
 ```
 -L min_read_length (ignores reads whose (mapped) length < L; default is 30)
 ```
-<br>
+
 <br>
 Additional filters (using samflags)
 ```
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
 ```
-<br>
-<br>
+
 See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 <br>
 <br>
