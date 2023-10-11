@@ -86,7 +86,6 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 -L min_read_length (ignores reads whose (mapped) length < L; default is 30)
 ```
 
-<br>
 Additional filters (using samflags)
 ```
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
