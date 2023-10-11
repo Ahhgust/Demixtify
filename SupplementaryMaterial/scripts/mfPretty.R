@@ -55,5 +55,5 @@ filter(tib, Label!='nsnps') %>%
     facet_wrap(~Filename, ncol=1) +
     theme_bw(base_size=20) -> pl
 
-ggsave("plotty.png", pl, height=3 + 10*length(args), width=12)
+ggsave("plotty.png", pl, height=3 + 15*length(args), width=12)
 

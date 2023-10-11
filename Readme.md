@@ -76,7 +76,6 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 ```
 <br>
 <br>
-
 ```
 -b min_base_quality (ignores reads with base quality < B; defaults to 20)
 ```
@@ -87,7 +86,6 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 ```
 <br>
 <br>
-
 ```
 -L min_read_length (ignores reads whose (mapped) length < L; default is 30)
 ```
@@ -98,6 +96,7 @@ Additional filters (using samflags)
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
 ```
+<br>
 <br>
 See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 <br>
