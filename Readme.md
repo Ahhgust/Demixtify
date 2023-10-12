@@ -93,8 +93,24 @@ More advanced read filters (using samflags syntax)
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
 ```
+How samflags behave is well-described by the Broad institute [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 
-Samflags are described by the Broad institute [here](https://broadinstitute.github.io/picard/explain-flags.html) 
+
+Inference
+```
+-g grid_size (defaults to 100 (+1 for the single-source model). The grid coarseness; implicitly sets the minimum detectable fraction to 1/grid_size) 
+```
+
+```
+-a AF_tag (the tag in the VCF file that provides the allele frequency; defaults to 'AF')
+```
+
+
+
+*Please ignore all other flags*! (they likely relate to deconvolution; a part of demixtify that is not ready from general use)
+
+
+
 <br>
 <br>
 
