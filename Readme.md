@@ -65,11 +65,13 @@ See the documentation [here](MFfile.md) to see how to work with the mixture frac
 
 ## Flags and options
 
-Demixtify has sensible defaults. Flags/options that may (reasonably) be varied are:
+Demixtify has sensible defaults. Flags/options that may (reasonably) be varied are:<br>
+For performance
 ```
 -t nthreads (reads in the BAM file in parallel; maximum advisable value is 5)
 ```
 
+Simple read filtering:
 ```
 -m min_mapping_quality (ignores reads with mapping quality < M; defaults to 20)
 ```
@@ -86,7 +88,7 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 -L min_read_length (ignores reads whose (mapped) length < L; default is 30)
 ```
 
-Additional filters (using samflags)
+More advanced read filters (using samflags syntax)
 ```
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
