@@ -79,7 +79,7 @@ which gives:
 |mf|0.0850|-536077.964784514|
 |mf|0.0900|-536028.757445578|
 |mf|0.0950|-536000.065252881|
-|mf|0.1000|-535990.300659860|
+|mf|0.1000|**-535990.300659860**|
 |mf|0.1050|-535998.036068408|
 |mf|0.1100|-536021.980580622|
 |mf|0.1150|-536060.960932980|
@@ -99,3 +99,4 @@ We can also visualize the likelihood profile:
 
 ![](mixture.png)
 
+And we can see the same thing as the table above, but in a prettier way.
