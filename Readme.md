@@ -27,6 +27,11 @@ Demixtify will then estimate:
 # Quick start (*nix systems only)
 ## Unix system, using static binaries
 
+
+<br><br>
+For examples on how to use Demixtify, see this tutorial[](SupplementaryMaterial/examples/examples.md)  
+  
+To install Demixtify, do the following:  
 Clone this repository, and put it in your _src_ directory.
 ```
 cd ~
