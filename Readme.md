@@ -98,7 +98,7 @@ How samflags behave is well-described by the Broad institute [here](https://broa
 
 Inference
 ```
--g grid_size (defaults to 100 (+1 for the single-source model). The grid coarseness; implicitly sets the minimum detectable fraction to 1/grid_size) 
+-g grid_size (defaults to 100 (+1 for the single-source hypothesis). The grid coarseness; implicitly sets the minimum detectable fraction to 1/grid_size) 
 ```
 
 ```

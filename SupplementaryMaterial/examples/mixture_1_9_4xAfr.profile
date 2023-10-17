@@ -1,0 +1,2 @@
+Filename	ErrorRate	NSnps	Mixture_MaxLL	MF	SingleSource_LL	LLR
+mixture_1_9_4xAfr.demix	0.001	575533	-535990.30065986	0.1	-544373.79749375	8383.496833889978
