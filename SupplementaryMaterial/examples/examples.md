@@ -36,7 +36,7 @@ The basic idea of maximum likelihood techniques is to find the parameter value (
 
 You can visualize the MF file ```mfPretty.R``` (note, this requires R and the tidyverse library to be installed)
 
-![](singlesource.png)
+![](singlesource.png =250x350)
 
 
 
