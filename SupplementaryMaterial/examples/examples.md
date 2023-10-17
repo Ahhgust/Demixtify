@@ -43,7 +43,7 @@ which contrasts the log-likelihod (y-axis) versus the mixture fraction (Fraction
 
 # Mixtures
 
-Now, let's make a mixture! As it stands, *Demixtify* only considers (up to) two-person mixtures. Here's how we can make one:
+Now, let's make a mixture! As it stands, *Demixtify* only considers (up to) two-person mixtures. Here's how we can make a 2-person mixture (and feed it directly to demixtify):
 ```
 bcftools view -H ../hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf | python3 ../../makeRandos.py -t 4 -F AF_afr -q 30 -s 1 -r 0.1 | cut -f-9 | ../../demix -d /dev/stdin > mixture_1_9_4xAfr.demix 
 ```
@@ -92,7 +92,7 @@ which gives:
 
 
 <br>
-If we look carefully, we can see that the log-likelihood closest to 0 just so happens to be for a 10% mixture fraction (**bolded** for emphasis; and for the cynics in the audience, no, I didn't cherry pick this example)
+If we look carefully, we can see that the log-likelihood closest to 0 just so happens to be for a 10% mixture fraction (__bolded__ for emphasis; and for the cynics in the audience, no, I didn't cherry pick this example)
 Very cool!
 
 We can also visualize the likelihood profile:
