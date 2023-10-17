@@ -20,7 +20,8 @@ head singleSource4xAfr.mf
 ```
 
 Gives:
-| label | mf  | log-likelihood  |  
+| label | mf  | log-likelihood  |
+| ----- | --- | ------- |
 | mf |     0.0000  |  -485744.351157961 |
 | mf  |   0.0050 |  -485794.490664077 |
 | mf   |   0.0100 | -485920.359570402 |
