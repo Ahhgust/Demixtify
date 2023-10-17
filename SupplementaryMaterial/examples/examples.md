@@ -88,10 +88,10 @@ which gives:
 |mf|0.1300|-536257.835518189|
 |mf|0.1350|-536347.078787231|
 |mf|0.1400|-536446.785736910|
-|mf|0.1450|-536556.233604883|
+|mf|0.1450|-536556.233604883|  
+  
 
 
-<br>
 If we look carefully, we can see that the log-likelihood closest to 0 just so happens to be for a 10% mixture fraction (__bolded__ for emphasis; and for the cynics in the audience, no, I didn't cherry pick this example)
 Very cool!
 
