@@ -29,9 +29,6 @@ Demixtify will then estimate:
 
 
 <br><br>
-For examples on how to use Demixtify, see this tutorial[](SupplementaryMaterial/examples/examples.md)  
-
-  
   
 To install Demixtify, do the following:  
 Clone this repository, and put it in your _src_ directory.
@@ -66,7 +63,11 @@ demix -t 4 -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3
 Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk; once that pipe is full,
 adding more threads will just make things go that much slower.
 
-See the documentation [here](MFfile.md) to see how to work with the mixture fraction estimates.
+See the documentation [here](MFfile.md) to see how to work with the mixture fraction estimates.  
+
+For examples on how to use Demixtify, see this [tutorial](SupplementaryMaterial/examples/examples.md)  
+
+  
 
 <br>
 
