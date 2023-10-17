@@ -105,7 +105,7 @@ And we can see the same thing as the table above, but in a prettier way.
 <br>
 
 Two items of note:<br>
-The first is that the DNA mixture hypothesis is more complicated than the single source hypothesis. This complicates the interpretation of the likelihood ratio. If we consider a two-person mixture, there's some non-zero mixture fraction, while a single source hypothesis is the same model where we set the mixture fraction to 0. Since we're testing (a bunch of) non-zero mixture fractions (and picking the *maximum* likelihood), and only a single 0, are two hypotheses do not have equal weight. To balance the odds its useful to do a likelihood ratio test (LRT)[click here for the wikipedia article](https://en.wikipedia.org/wiki/Likelihood-ratio_test), where we consider the "null" (ie, simpler) hypothesis to be a single source sample, and the "alternative" hypothesis is the more complicated mixture hypothesis. <br>
+The first is that the DNA mixture hypothesis is more complicated than the single source hypothesis. This complicates the interpretation of the likelihood ratio. If we consider a two-person mixture, there's some non-zero mixture fraction, while a single source hypothesis is the same model where we set the mixture fraction to 0. Since we're testing (a bunch of) non-zero mixture fractions (and picking the *maximum* likelihood), and only a single 0, are two hypotheses do not have equal weight. To balance the odds its useful to do a likelihood ratio test (LRT) [click here for the wikipedia article](https://en.wikipedia.org/wiki/Likelihood-ratio_test) , where we consider the "null" (ie, simpler) hypothesis to be a single source sample, and the "alternative" hypothesis is the more complicated mixture hypothesis. <br>
 <br>
 
 Let's consider a condensed version of the MF files (provided by MFpretty.R):
@@ -116,7 +116,6 @@ Let's consider a condensed version of the MF files (provided by MFpretty.R):
 |singleSource4xAfr.profile|singleSource4xAfr.demix|0.001|575533|-485794.490664077|0.005|-485744.351157961|-50.13950611598557|
 
 
-A simple recipe is this; if the likelihood for the single-source hypothesis (MF=0) is more likely, it is appropriate to deem the sample single source (as per the above). <br> If we take &#x1D6FC; =0.01, we can take
-If the difference in the log-likelihoods is < 
-
-Some items of note; the (log-)likelihoods are *huge*. This is somewhat expected for genomic assays
+A simple recipe is this; if the likelihood for the single-source hypothesis (MF=0) is the most likely (in the above, SingleSource_LL >= Mixture_MaxLL), it is appropriate to deem the sample single source). <br>Otherwse, -2*LLR is chi-square distributed (asymptotically, a reasonable assumption for genomic data). You can use a chi-square [table](https://www.math.arizona.edu/~jwatkins/chi-square-table.pdf) to see if you can reject the single source (ie, null) hypothesis. Indeed, in the second record above,  -2LLR ~ 100 > 6.635; (6.635 being the critical value if alpha=0.01). Importantly, our paper shows that even if you mis-specify the population (as we do here; demixtify uses the pooled allele frequency to estimate the MF, while the simulations did not), that the answer you get is reasonable.
+<br><br>
+The second item of note; the (log-)likelihoods are *huge*. This is somewhat expected of genomic assays, but may be surprising to the uninitiated.
