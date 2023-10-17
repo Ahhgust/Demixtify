@@ -92,7 +92,7 @@ which gives:
 
 
 <br>
-If we look carefully, we can see that the log-likelihood closest to 0 just so happens to be for a 10% mixture fraction (and for the cynics in the audience, no, I didn't cherry pick this example)
+If we look carefully, we can see that the log-likelihood closest to 0 just so happens to be for a 10% mixture fraction (**bolded** for emphasis; and for the cynics in the audience, no, I didn't cherry pick this example)
 Very cool!
 
 We can also visualize the likelihood profile:
@@ -100,3 +100,23 @@ We can also visualize the likelihood profile:
 ![](mixture.png)
 
 And we can see the same thing as the table above, but in a prettier way.
+
+<br>
+<br>
+
+Two items of note:<br>
+The first is that the DNA mixture hypothesis is more complicated than the single source hypothesis. This complicates the interpretation of the likelihood ratio. If we consider a two-person mixture, there's some non-zero mixture fraction, while a single source hypothesis is the same model where we set the mixture fraction to 0. Since we're testing (a bunch of) non-zero mixture fractions (and picking the *maximum* likelihood), and only a single 0, are two hypotheses do not have equal weight. To balance the odds its useful to do a likelihood ratio test (LRT)[click here for the wikipedia article](https://en.wikipedia.org/wiki/Likelihood-ratio_test), where we consider the "null" (ie, simpler) hypothesis to be a single source sample, and the "alternative" hypothesis is the more complicated mixture hypothesis. <br>
+<br>
+
+Let's consider a condensed version of the MF files (provided by MFpretty.R):
+
+|Filename|Filename|ErrorRate|NSnps|Mixture_MaxLL|MF|SingleSource_LL|LLR|
+| -- |      ---   | --- |    -- | -- | -- | -- | -- |
+|mixture_1_9_4xAfr.profile|mixture_1_9_4xAfr.demix|0.001|575533|-535990.30065986|0.1|-544373.79749375|8383.496833889978|
+|singleSource4xAfr.profile|singleSource4xAfr.demix|0.001|575533|-485794.490664077|0.005|-485744.351157961|-50.13950611598557|
+
+
+A simple recipe is this; if the likelihood for the single-source hypothesis (MF=0) is more likely, it is appropriate to deem the sample single source (as per the above). <br> If we take &#x1D6FC; =0.01, we can take
+If the difference in the log-likelihoods is < 
+
+Some items of note; the (log-)likelihoods are *huge*. This is somewhat expected for genomic assays
