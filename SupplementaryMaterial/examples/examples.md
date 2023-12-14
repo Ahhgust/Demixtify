@@ -116,6 +116,14 @@ Let's consider a condensed version of the MF files (provided by MFpretty.R):
 |singleSource4xAfr.profile|singleSource4xAfr.mf|0.001|575533|-485794.490664077|0.005|-485744.351157961|-50.13950611598557|
 
 
-A simple recipe is this; if the likelihood for the single-source hypothesis (MF=0) is the most likely (in the above, SingleSource_LL >= Mixture_MaxLL), it is appropriate to deem the sample single source). <br>Otherwse, -2*LLR is chi-square distributed (asymptotically, a reasonable assumption for genomic data). You can use a chi-square [table](https://www.math.arizona.edu/~jwatkins/chi-square-table.pdf) with 1 degree of freedom to see if you can reject the single source (ie, null) hypothesis. Indeed, in the second record above,  -2LLR ~ 100 > 6.635; (6.635 being the critical value if alpha=0.01). Importantly, our paper shows that even if you mis-specify the population (as we do here; demixtify uses the pooled allele frequency to estimate the MF, while the simulations did not), that the answer you get is reasonable.
+A simple recipe is this; if the likelihood for the single-source hypothesis (MF=0) is the most likely (in the above, SingleSource_LL >= Mixture_MaxLL), it is appropriate to deem the sample single source).
+<br>Otherwse, -2*LLR is chi-square distributed (asymptotically, a reasonable assumption for genomic data). You can use a chi-square [table](https://www.math.arizona.edu/~jwatkins/chi-square-table.pdf) with 1 degree of freedom to see if you can reject the single source (ie, null) hypothesis. Indeed, in the second record above,  -2LLR ~ 100 > 6.635; (6.635 being the critical value if alpha=0.01).
+<br>Importantly, our paper shows that even if you mis-specify the population (as we do here; demixtify uses the pooled allele frequency to estimate the MF, while the simulations did not), that the answer you get is reasonable.
 <br><br>
-The second item of note; the (log-)likelihoods are *huge*. This is somewhat expected of genomic assays, but may be surprising to the uninitiated.
+
+# Very very imbalanced mixtures
+
+Demixtify uses a grid-search. Grid searches are simple and effective tools, but they can act funny at the edges. <br>
+For us, if the smallest non-zero MF is the MLE (e.g., in the above mixture scenario, if the MF is estimated to be 0.5%), we should be skeptical. <br>
+All we *really* know is that a 0.5% mixture is more likely than the single source hypothesis. In reality, the true maximum is some number betweeen 0 < x < 1%. E.g., it could be a 1:1million mixture, which can happen if there are a few drop-in alleles.
+A reasonable countermeasure is to call a sample an *effective mixture* if the inferred MF >0.5% (or really, not on the edge of the search space).
