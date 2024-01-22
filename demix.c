@@ -71,7 +71,8 @@ die(const char *arg0, const char *extra) {
 
     "\t-h (prints this message) " << endl <<
     "\t-c countsFile (writes the allele counts to file)" << endl <<
-    "\t-b bamFile (input)" << endl <<
+    "\t-b bamFile or cramFile (input)" << endl <<
+    "\t-T referenceFasta (input; needed for CRAM only)" << endl <<
     "\t-o outFile (writes deconvolved data in the V/BCF file format; defaults to standard output)" << endl <<
     "\t-i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites" << endl <<
     "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
@@ -117,6 +118,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.knowns=0;
 	opt.downsampleFraction=0; // by default, keep all reads
 	opt.mixedVcf=NULL;
+	opt.referenceFasta=NULL; // only needed for CRAM support.
 	opt.filterIndelAdjacent=true;
 	opt.help=false;
 	opt.parseVcf=false;
@@ -181,6 +183,8 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      }
 	    } else if (flag == 't') {
 	      opt.numThreads = max(atoi(argv[i]), 1);
+	    } else if (flag == 'T') {
+	      opt.referenceFasta=argv[i];
 	    } else if (flag == 'g') {
 	      opt.ngrid = max(atoi(argv[i]), 2);
 	    } else if (flag == 'r') {
@@ -266,6 +270,71 @@ ostream& operator<<(ostream &os, const BaseCounter &b) {
 }
 
 
+void
+initReferenceGenome(const char *fpFilename, htsFile *fp, const char *fastaRef) {
+
+  /*
+    This initializes the reference genome w/ HTSlib.
+    It expects the bam/cram filename (fpFilename)
+    an htsFile object (of that file)
+    and the path to the reference genome (fastaRef)
+
+    Passing this routine a BAM file is harmless, even if the fastaRef is NULL
+    passing it a CRAM file will initialize things (I hope) so that the cram file can be seamlessly read 
+   */
+  
+  int i, errors=0;
+
+  const char *s = fpFilename;
+
+
+  // this is an "ends_with" written in C
+  // good times!
+
+  for (i=0; *fpFilename; ++i, ++fpFilename)
+    ;
+
+    
+  --fpFilename;
+  // filenames must end in either .cram or .bam.
+  // (and no, .bam is not a valid filename)
+  if (i < 5) {
+    cerr << "Illegal bam/cram filename: " << s << endl;
+    exit(1);
+  }
+
+  if (*fpFilename != 'm')
+    ++errors;
+  --fpFilename;
+  
+  if (*fpFilename != 'a')
+    ++errors;
+  --fpFilename;
+
+  if (*fpFilename == 'b') {
+    return; // TODO: double check that this behavior is desired.; if it's a bam file, we don't need a reference... soo..
+  } else if (! (*fpFilename == 'r' && fpFilename[-1] == 'c') )
+    ++errors; // and not a cram file.
+  
+  if (errors) {
+    cerr << "Illegal bam/cram file extension... " << s << endl;
+    exit(1);
+  }
+
+  if (fastaRef==NULL) {
+    cerr << "CRAM file detected, but no reference genome is provided. Please fix this!" << endl;
+    exit(1);
+  }
+
+  if (hts_set_fai_filename(fp, fastaRef) != 0) {
+    cerr << "Failed to load reference: " << s << endl;
+    exit(1);
+  }
+
+  
+}
+
+
 /*
   POSSIBLE_GENOS has the genotype strings AAAA, AAAB, ... BBBB
   if we know one one of the alleles is (AB)
@@ -340,21 +409,6 @@ getGenoIterators(const std::string &known, char type, int *itr) {
     return N_GENOS;
   }
   return -1;
-}
-
-/*
-  Returns the log probability that the site is segregating.
-  ie, 1-  prob(AAAA OR BBBB)
- */
-
-double
-getProbSeg2Unknowns(double *genolikes, double totalLL) {
-
-  // logsumexp applied to a pair
-  double maxL = *genolikes;
-  double otherL = genolikes[ N_GENOS-1];
-  double num = exp(maxL) + exp(otherL); // likelihood of being homozygous identical
-  return 1.-num/exp(totalLL); 
 }
 
 // converts an internal representation of a BAM sequence to ASCII; this function is just for demonstration purposes...
@@ -597,6 +651,9 @@ threadSummarizeRegion(void *vargs) {
   samFile *in = sam_open(opt.bamFilename, "r");
   if (in == NULL)
     return -1;
+
+  // needed for cram support...
+  initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
   
   sam_hdr_t *header = sam_hdr_read(in);
   if (header == NULL)
@@ -945,6 +1002,8 @@ main(int argc, char **argv) {
     samFile *in = sam_open(opt.bamFilename, "r");
     if (in == NULL)
       return -1;
+
+    initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
     
     sam_hdr_t *header = sam_hdr_read(in);
     if (header == NULL)
@@ -1012,6 +1071,8 @@ main(int argc, char **argv) {
       samFile *in = sam_open(opt.bamFilename, "r");
       if (in == NULL)
 	return -1;
+
+      initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
       
       sam_hdr_t *header = sam_hdr_read(in);
       if (header == NULL)
@@ -1188,19 +1249,25 @@ readVcf(char *fname, vector<Locus> &loci, int knownIndex, BaseCounter *results, 
 	a2 = bcf_gt_allele(gt_arr[knownIndex+1]);
 
 	// skip no-calls in the "known"
-	if (a1 < 0 || a2 < 0)
-	  continue;
-
-	a1 = a1 + a2;
-	if (a1==0) {
-	  loc.genotypecall=AA;
-	} else if (a1 == 1) {
-	  loc.genotypecall=AB;
-	} else if (a1 == 2) {
-	  loc.genotypecall=BB;
+	// on second thought; let's keep 'em
+	// the "known" may be known from a (relatively sparse) SNP chip; we'd still want
+	// to use imputation based on the other sites. (or at least the ability
+	// to filter these sites out later...)
+	if (a1 < 0 || a2 < 0) {
+	  //continue;
+	  loc.genotypecall=NOCALL;
 	} else {
-	  cerr << "Parse error for snp at position: " << loc.region << endl;
-	  continue;
+	  a1 = a1 + a2;
+	  if (a1==0) {
+	    loc.genotypecall=AA;
+	  } else if (a1 == 1) {
+	    loc.genotypecall=AB;
+	  } else if (a1 == 2) {
+	    loc.genotypecall=BB;
+	  } else {
+	    cerr << "Parse error for snp at position: " << loc.region << endl;
+	    continue;
+	  }
 	}
 	
       } else {

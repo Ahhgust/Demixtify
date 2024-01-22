@@ -46,6 +46,7 @@ typedef struct {
   bool filterIndelAdjacent;
   bool help;
   const char *mixedVcf;
+  const char *referenceFasta; // needed for cram support.
   char *bamFilename;
   char *bedFilename;
   char *outCounts;
