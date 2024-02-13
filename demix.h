@@ -5,6 +5,7 @@
 #include <vector>
 #include <math.h>
 #include <algorithm>
+#include <cstdlib>
 
 typedef struct {
   std::string region;
@@ -21,6 +22,13 @@ typedef struct {
 
 #define DEFAULT_AF -1
 #define MIN_AF 0.0001
+
+#define VERSION "0.01"
+
+// -10.0/ln(10)
+// useful when converting log likelihoods (LN)
+// to phred-scaled likelihoods (-10*log10(like))
+const double PHRED_SCALAR = -4.3429448190325175;
 
 const char* DEFAULT_AF_TAG="AF";
 
@@ -49,7 +57,7 @@ typedef struct {
   const char *referenceFasta; // needed for cram support.
   char *bamFilename;
   char *bedFilename;
-  char *outCounts;
+  const char *outCounts;
   std::string outVCF;
   const char* AFtag;
   bool parseVcf; // the "bed" file may either be .bed or .vcf
@@ -84,8 +92,11 @@ std::string POSSIBLE_GENOS[] = {
 };
 
 
+// the "likelihood" for a known genotype (e.g., 0,255,255 for a homozygous reference call)
+#define KNOWN_PL 255
 
 #define N_GENOS 9
+#define N_MARGINALS 6
 #define SKIP_SNP UINT_MAX
 
 // gives indexes in POSSIBLE_GENOS consistent w/ some known genotype (see below)
@@ -124,7 +135,7 @@ bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> 
 
 // writes the counts data structure to file (plain text)
 // and it writes the likelihoods...
-void writeCounts(const char *outfile, std::vector<Locus> *loci, BaseCounter *counts, double mf, const Options *opt);
+void writeCounts(const char *outfile, std::vector<Locus> *loci, BaseCounter *counts, double mf, double error, const Options *opt);
 
 // # Helper/convenience functions
 // validates a an allele (must be in the set [ACGT])
@@ -158,13 +169,13 @@ void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N
 // log-sum-exp trick applied to the genotype likelihoods
 // gives the log( sum (likelihoods)) when the likelihoods are in log-space
 // 
-inline double log_sum_exp(double *genolikes, bool justmax);
+inline double log_sum_exp(double *genolikes);
 
 // same as above, but a vector of indexes (knowns, corresponding to 2-person genotypes
 // which are consistent with some KNOWN genotype) can be used to compute the LL
 // considering SOME of the indexes
 inline double
-log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos, bool justmax);
+log_sum_exp_with_knowns(double *genolikes, int *knowns, int ngenos);
 // perl-inspired print to stderr and exit. extra may be NULL
 void die(const char *arg0, const char *extra);
 
