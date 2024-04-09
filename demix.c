@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <iostream>
+#include <istream>
 #include <string>
 #include <stdlib.h>
 #include <stdint.h>
@@ -59,6 +60,7 @@ ostream& operator<<(ostream &os, const Locus &loc) {
   return os << loc.region << "\t" << loc.allele1 << "/" << loc.allele2;
 }
 
+const char FST_TAGS[] = "AF_sas,AF_fin,AF_eas,AF_afr,AF_nfe";
 
 void
 die(const char *arg0, const char *extra) {
@@ -83,11 +85,12 @@ die(const char *arg0, const char *extra) {
     "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
     "\t-k knownIndex (from the VCF file, the 1-based index of the known contributor; defaults to 0 (no known contributor))" << endl<<
     "\t-a aftag (the tag to use in the VCF file to get the allele frequency. defaults to AF" << endl<<
+    "\t-w threshold on Wright's FST" << endl<<
     "\t-t nthreads (number of threads to use. Defaults to 1) " << endl <<    
     "\t-m mapping_quality (minimum mapping quality). Default: " << DEFAULT_MIN_MAPQ <<  endl <<
     "\t-F fraction (the mixture fraction; if unspecified, this is estimated)" << endl <<
     "\t-q base_quality (minimum base quality, applied to reads). Default: " << DEFAULT_MIN_BASEQ << endl <<
-    //"\t-Q error_quality (Recalibrated error rate is never high than (Phred-scaled value)). Default: " << DEFAULT_MIN_BASEQ+10 << endl <<
+    "\t-Q error_quality (Recalibrated error rate is never high than (Phred-scaled value)). Default: " << DEFAULT_MIN_BASEQ+10 << endl <<
     "\t-D downsampling_rate (A value between [0,1]: the probability of dropping a read; defaults to 0.0, which keeps all reads)" << endl <<
     "\t-s seed (sets the random number seed)" << endl <<
     "\t-L length (minimum read length). Default: " << DEFAULT_MIN_READLEN << endl <<
@@ -112,6 +115,8 @@ validNuc(char c) {
 bool
 parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	int i = 1;
+	const char* fstTags=FST_TAGS;
+	
 	opt.filter=DEFAULT_READ_FILTER;//(BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP);
 	opt.include_filter=DEFAULT_READ_INCLUDE_FILTER;
 	opt.outCounts=opt.bedFilename = opt.bamFilename= NULL;
@@ -127,6 +132,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.filterIndelAdjacent=true;
 	opt.help=false;
 	opt.parseVcf=false;
+	opt.fstFilt=-1.; // any negative number specifies no FST filter. otherwise, it's the maximum Fst permitted
 	opt.ngrid=DEFAULT_NGRID;
 	opt.numThreads=1;
 	opt.mixtureFraction=-1.0;
@@ -186,6 +192,8 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 		cerr << "The downsampling fraction must be between 0 and 1!" << endl;
 		++errors;
 	      }
+	    } else if (flag == 'w') {
+	      opt.fstFilt= max(atof(argv[i]), 0.); // maximum FST permitted when estimating the mixture fraction
 	    } else if (flag == 't') {
 	      opt.numThreads = max(atoi(argv[i]), 1);
 	    } else if (flag == 'T') {
@@ -200,6 +208,10 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      opt.bamFilename = argv[i];
 	    } else if (flag == 'a') {
 	      opt.AFtag=argv[i];
+	    } else if (flag == 'p') { // and the populations amongst which FST is estimated; -p implies -w
+	      fstTags = argv[i];
+	      if (opt.fstFilt < 0)
+		opt.fstFilt=DEFAULT_MAX_FST;
 	    } else if (flag == 'd') {
 	      opt.bedFilename = argv[i];
 	    } else if (flag == 'c') {
@@ -219,7 +231,9 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 		cerr << "Only single-nucleotide regions are allowed" << endl;
 		++errors;
 	      }
-	      
+	      if (flag == '-') {
+		break; // respect unix-style -- to end the arguments
+	      }
 	    } else {
 	      ++errors;
 	      cerr << "Unexpected flag: " << argv[i-1] << endl;
@@ -256,8 +270,7 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	    cerr << "And alleles may not be the same... " << endl;
 	  }
 	}
-	
-	
+		
 
 	if (errors)
 	  return false;
@@ -265,9 +278,56 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 
 	if (opt.help)
 	  die(argv[0], NULL);
+
+
+	// if we're filtering on FST, let's define what AF_ tags we want to use
+	// converting from a csv: const char* to a vector of strings
+	if (opt.fstFilt >= 0.) {
+	  csv2vec( fstTags, &(opt.fstPops));
+	}
 	
 	return true;
 }
+
+// takes a csv (str)
+// and a vector (vec) of strings
+// and adds the contents of str to vec
+// returns the number of items added
+int
+csv2vec(const char* str, std::vector<std::string> *vec) {
+  string tmp;
+  string s(str);
+  int i=0;
+  stringstream ss(s);
+  while (getline(ss, tmp, ',')) {
+    vec->push_back(tmp);
+    ++i;
+  }
+  return i;
+}
+
+// as above, but for doubles
+int
+csv2vec(const char* str, std::vector<double> *vec) {
+  string tmp;
+  string s(str);
+  int i=0;
+  stringstream ss(s);
+  double d;
+  char *end;
+  
+  while (getline(ss, tmp, ',')) {
+    d = strtod(tmp.c_str(), &end);
+    if (*end) {
+      cerr << "Problem parsing double from: " << str << endl << end << endl;
+      exit(1);
+    }
+    vec->push_back( d );
+    ++i;
+  }
+  return i;
+}
+
 
 
 ostream& operator<<(ostream &os, const BaseCounter &b) {
@@ -621,9 +681,15 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
       ++count.refCount;
     else if (basecall.b==loc->allele2)
       ++count.altCount;
-    else
+    else {
       ++count.otherCount;
+    }
   }
+  /*
+  if (count.otherCount) {
+      cerr << *loc << "\t" << count.refCount << "\t" << count.altCount <<  "\t" << count.otherCount << endl;
+  }
+  */
 
 #if DEBUG
   cout << *loc << ' ' << count << endl;
@@ -714,7 +780,9 @@ computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENO
   if (altFreq >= 0.) {
     if (altFreq < MIN_AF)
       altFreq = MIN_AF;
-
+    else if (1.-altFreq < MIN_AF)
+      altFreq = 1. - MIN_AF;
+	
     out -= N_GENOS;
     for (i=0 ; i < N_GENOS; ++i, ++out) {
       // todo: Fst correction?
@@ -833,7 +901,8 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     it = loci->begin();
     c = counts;
     for (j=0; j < nLoci; ++j, ++it, ++c) {
-      if (c->badCount != SKIP_SNP) { 
+      // equivalent to != SKIP_SNP and != IGNORE_SNP
+      if (c->badCount < IGNORE_SNP && c->refCount + c->altCount > 0) { 
 
 	computeLikesWithM(c->refCount, c->altCount, aweights, error, genolikes, it->af);
 	
@@ -857,7 +926,17 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
 	  loglike += log_sum_exp_with_knowns(genolikes, idx, nIndexes);
 
 	} else {
-	  loglike += log_sum_exp(genolikes);
+	  double ll = log_sum_exp(genolikes);
+	  /*
+	  if (ll > 0) {
+	    cerr << ll << " "  << c->refCount << " " <<  c->altCount << "\t" << it->af << endl;
+	    for (int x =0; x <9; ++x)
+	      cerr << "\t" << genolikes[x];
+	  }
+	  cerr << endl;
+	  */
+
+	  loglike += ll;
 	}
 	
       }
@@ -988,6 +1067,33 @@ computeMarginals(int AAindexes[N_GENOS],
 
 }
 
+//
+// Takes a vector of length 3; log likelihoods for AA,AB,BB genotypes
+// and returns the Phred-scaled genotype quality (int)
+// min/max set to [0,99], ala GATK
+int
+getGQ(double *marginalLikes) {
+
+  int maxI=0; //argmax
+  int i;
+  double probWrong=0.;
+  for (i=1; i < 3; ++i) {
+    if (marginalLikes[i] > marginalLikes[maxI])
+      maxI=i;
+  }
+
+  // gets the sum of the likelihoods associated w/ all other genotype calls considered
+  for(i=0; i < 3; ++i) {
+    if (i != maxI)
+      probWrong += exp(marginalLikes[i]);
+  }
+
+  //cout << exp(marginalLikes[maxI]) << "\t" << probWrong << "\t" << PHRED_SCALAR*(log(probWrong)-marginalLikes[maxI]) << endl;
+  
+  return round(std::min(99., std::max(0., (PHRED_SCALAR*(log(probWrong)-marginalLikes[maxI])))));
+}
+
+
 // TODO!
 // heavily influenced by: https://github.com/odelaneau/GLIMPSE/blob/master/phase/src/io/genotype_writer.cpp
 // see also: http://broadinstitute.github.io/gamgee/doxygen/hts_8h.html
@@ -1049,6 +1155,7 @@ writeVcf(double mf, double error, BaseCounter *counts, vector<Locus> *loci, Opti
   
   bcf_hdr_append(hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotypes\">");
   bcf_hdr_append(hdr, "##FORMAT=<ID=PL,Number=G,Type=Integer,Description=\"Genotype likelihoods; Phred scaled, marginal\">");
+  bcf_hdr_append(hdr, "##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality; Phred scaled, taken as likelihood(genotype call is right)/likelihood(wrong)\">");
 
 
 
@@ -1128,7 +1235,7 @@ writeVcf(double mf, double error, BaseCounter *counts, vector<Locus> *loci, Opti
     // default genotypes set to 0/0 (common case)
     std::fill(bcfgenotypes, bcfgenotypes + 4, bcf_gt_unphased(false));
     bcfgenotypes[4] = bcf_int32_vector_end;
-
+    // TODO: this is the wrong likelihood function! (no with M)
     computeLikesWithM(counts->refCount, counts->altCount, aweights, error, genolikes, -1);
     //logLikeToPL(genolikes, N_GENOS, phredlikes);
     if (!opt.knowns || it->genotypecall==NOCALL ) {
@@ -1275,6 +1382,11 @@ writeVcf(double mf, double error, BaseCounter *counts, vector<Locus> *loci, Opti
     bcf_update_genotypes(hdr, rec, bcfgenotypes, 4);
     bcf_update_format_int32(hdr, rec, "PL", phredlikes, 6);
 
+
+    int genoQuals[2];
+    genoQuals[0] = getGQ(marginalLikes); // considers the three marginal likelihoods for id1
+    genoQuals[1] = getGQ(&(marginalLikes[3])); // and again, for id2
+    bcf_update_format_int32(hdr, rec, "GQ", genoQuals, 2);
     
     if (bcf_write1(fp, hdr, rec) ) {
       cerr << "Write error. That's not good." << endl;
@@ -1358,7 +1470,7 @@ main(int argc, char **argv) {
     } else {
 
       
-      if (! readBed(opt.bedFilename, loci, tmpResults)) 
+      if (! readBed(opt.bedFilename, loci, tmpResults, opt)) 
 	die(argv[0], "Failed to parse the bed file ... ");
 
       
@@ -1624,7 +1736,7 @@ readVcf(char *fname, vector<Locus> &loci, int knownIndex, BaseCounter *results, 
 }
 
 bool
-readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
+readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc, const Options &opt) {
   ifstream bedFile;
   string line;
   
@@ -1634,6 +1746,8 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
 
   bool ret=true;
   bool printWarn=false;
+  std::vector<double> afs;
+  int nrecs;
   
   while (getline(bedFile, line)) {
     if (line[0] == '#') // bed files may have a header; headers must have a #. technically these can be anywhere in the file, but, well, laziness :)
@@ -1704,12 +1818,28 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
       bc.push_back(foo);
     } 
     
-    if (records.size() > 8) {
-      loc.af = atof(records[8].c_str());
+    if (records.size() > 8) { // modified to have the allele frequency column be a csv; the 0th value is "the" allele frequency
+      // any subsequent values are population-specific allele frequencies
+      afs.clear();
+      nrecs=csv2vec(records[8].c_str(), &afs);
+      if (nrecs<1) {
+	cerr << "Should never happen. " << records[8] << endl;
+	exit(1);
+      }
+      //loc.af = atof(records[8].c_str());
+      loc.af = afs[0];
+      
       if (loc.af < 0. || loc.af > 1.) {
 	cerr << "Invalid allele frequency on line" << endl << line << endl << records[7] << endl;
 	return false;
       }
+
+      if (opt.fstFilt >= 0.0) {
+	loc.maxFst=getMaxFst(afs, true);
+	if (loc.maxFst > opt.fstFilt) 
+	  bc.back().badCount=IGNORE_SNP;
+      }
+
     }
     // assumes a 0/1/2 encoding for one of the "known" genotypes
     if (records.size() > 9) {
@@ -1728,6 +1858,55 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc) {
   
   bedFile.close();
   return ret;
+}
+
+//
+// this takes nAlt altFrequencies
+// (from the vcf INFO line)
+// and computes the MAX Fst
+// the idea is to use the set of SNPS whose MAX fst is small when we estimate the mixture fraction
+// skip0th (when true) skips element 0 in the vector.
+// (syntactic sugar)
+
+double
+getMaxFst(std::vector<double> afs, bool skip0th=false) {
+  int nAlts = afs.size();
+  if (nAlts < 2 + skip0th)
+    return -1.;
+
+  int i, j;
+  bool gotone=false;
+  double fst, maxFst=-1;
+  for (i=skip0th; i < nAlts; ++i) {
+
+    for (j=i+1; j < nAlts; ++j) {
+
+      // fst is only defined if the site is segregating (in either pop)
+      if (
+	  (afs[i] > 0.0 || afs[j] > 0.0) &&
+	  (afs[i] < 1.0 || afs[j] < 1.0)
+	  ) {
+	gotone=true;
+	fst = FST_HUDSON(afs[i], afs[j]);
+	if (fst > maxFst) {
+	  maxFst=fst;
+	}
+      }
+    }
+  }
+
+
+  if (! gotone) 
+    return -1;
+  
+  // fst should be in [0,1]
+  // however, the hudson estimator can sometimes exceed those bounds...
+  if (maxFst>1.)
+    maxFst=1.;
+  else if (maxFst<0.)
+    maxFst=0.;
+
+  return maxFst;
 }
 
 /*
