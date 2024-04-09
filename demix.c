@@ -815,7 +815,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     it = loci->begin();
     c = counts;
     for (j=0; j < nLoci; ++j, ++it, ++c) {
-      if (c->badCount != SKIP_SNP) { 
+      if (c->badCount != SKIP_SNP && c->refCount + c->altCount > 0) { 
 
 	computeLikesWithM(c->refCount, c->altCount, aweights, error, genolikes, it->af);
 	

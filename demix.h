@@ -14,6 +14,9 @@ typedef struct {
   float af; // population allele frequency; defaults to DEFAULT_AF
 } Locus;
 
+#define VERSION 0.1
+// bugfix; it no longer considers sites w/ 0 reads. this gave some inefficiency, and caused the likelihood to exceed 1 (though the likelihood ratios were unaffected)
+
 #define NOCALL 0
 #define AA 1
 #define AB 2
