@@ -767,7 +767,7 @@ genotypesToAlleleWeights(double mf, double *w) {
 //
 // Computes the posterior probability iff the altFrequency is defined. i.e.,  >=0)
 inline void
-computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq) {
+computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq, double fst) {
 
 
   int i = 0;
@@ -788,9 +788,23 @@ computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENO
       // todo: Fst correction?
       // and yes, given HWE I can just compute the log geno probability directly...
       c = POSSIBLE_GENOS[i].c_str();
-      f = GENOPROB(c, altFreq);
+
+
+
+      if (fst > 0.0)
+      	f = GENOPROBFST(c, altFreq, fst);
+      else
+	f = GENOPROB(c, altFreq);
+
       c += 2;
-      f *= GENOPROB(c, altFreq);
+      
+      if (fst > 0.0)
+	f *= GENOPROBFST(c, altFreq, fst);
+      else
+	f *= GENOPROB(c, altFreq);
+
+
+      //      cout << POSSIBLE_GENOS[i] << " " <<  altFreq << " " << fst << "\t" << f << endl;
       *out += log(f);
     }
   }
@@ -903,8 +917,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     for (j=0; j < nLoci; ++j, ++it, ++c) {
       // equivalent to != SKIP_SNP and != IGNORE_SNP
       if (c->badCount < IGNORE_SNP && c->refCount + c->altCount > 0) { 
-
-	computeLikesWithM(c->refCount, c->altCount, aweights, error, genolikes, it->af);
+	computeLikesWithM(c->refCount, c->altCount, aweights, error, genolikes, it->af, it->maxFst);
 	
 	if (i==0)
 	  ++nIncluded;
@@ -1235,9 +1248,9 @@ writeVcf(double mf, double error, BaseCounter *counts, vector<Locus> *loci, Opti
     // default genotypes set to 0/0 (common case)
     std::fill(bcfgenotypes, bcfgenotypes + 4, bcf_gt_unphased(false));
     bcfgenotypes[4] = bcf_int32_vector_end;
-    // TODO: this is the wrong likelihood function! (no with M)
-    computeLikesWithM(counts->refCount, counts->altCount, aweights, error, genolikes, -1);
-    //logLikeToPL(genolikes, N_GENOS, phredlikes);
+    // -1s turn off posterior prob calc
+    computeLikesWithM(counts->refCount, counts->altCount, aweights, error, genolikes, -1, -1);
+
     if (!opt.knowns || it->genotypecall==NOCALL ) {
       computeMarginals(AAindexes,ABindexes,BBindexes,AAindexesMinor,ABindexesMinor,BBindexesMinor,genolikes,marginalLikes);
       //logLikeToPL(const double *in, int n, int *out) {
@@ -1789,6 +1802,8 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc, const Opti
     loc.allele2=records[4][0];
     loc.genotypecall=NOCALL;
     loc.af=DEFAULT_AF;
+    loc.maxFst=0.;
+    
     // convert to upper-case letters.
     if (loc.allele1 > 'Z') {
       loc.allele1 -= 32;
@@ -1975,7 +1990,7 @@ writeCounts(const char *outfile, vector<Locus> *loci, BaseCounter *counts, doubl
 	"\t" << counts->badCount;
 
       // note: -1 forces us to just compute the likelihood... (and not the posterior)
-      computeLikesWithM(counts->refCount, counts->altCount, aweights, error, genolikes, -1);
+      computeLikesWithM(counts->refCount, counts->altCount, aweights, error, genolikes, -1, -1);
       //logLikeToPL(genolikes, N_GENOS, phredlikes);
       for (i =0; i < N_GENOS; ++i) {
 	fh << "\t" << genolikes[i];

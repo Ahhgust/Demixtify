@@ -131,8 +131,10 @@ int getGenoIterators(const std::string &known, char type, int *itr);
 #define MINOR 2
 #define ALL   3
 
-#define GENOPROB(c, a) (c[0]=='A' && c[1]=='A' ? (1-a)*(1-a) : (c[0]=='B' && c[1]=='B' ? (a)*(a) : 2*(1-a)*a))
+#define GENOPROB(c, a)       ( c[0]=='A' && c[1]=='A' ? (1-a)*(1-a)             : (c[0]=='B' && c[1]=='B' ? (a)*(a)             : 2*(1-a)*a))
 
+// theta-corrected
+#define GENOPROBFST(c, a, f) ( c[0]=='A' && c[1]=='A' ? ((1-a)*(1-a)+(1-a)*a*f) : (c[0]=='B' && c[1]=='B' ? ((a)*(a)+(1-a)*a*f) : 2*(1-a)*a*(1.-f) ))
 
 // Meat and potatoes!
 // this takes in a single locus and fills out a BaseCounter struct
@@ -190,7 +192,7 @@ bool validNuc(char c);
 void genotypesToAlleleWeights(double mf, double *w);
 
 // computes the 9 likelihoods associated with a pair of counts on A and B alleles
-void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq);
+void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq, double fst);
 
 
 int csv2vec(const char* s, std::vector<std::string> *vec);
