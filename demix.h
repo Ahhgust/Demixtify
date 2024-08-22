@@ -9,22 +9,49 @@
 
 typedef struct {
   std::string region;
+  uint32_t pos;
   char allele1;
   char allele2;
   char genotypecall;
   float af; // population allele frequency; defaults to DEFAULT_AF
-  float maxFst; // across populations, the maximum FST
+  float Fst; // estimator of FST; in practice, the "mean" pairwise (expectation of ratios) works the best (as opposed to typical estimator; ratio of expectatinos)
 } Locus;
+
+
+// the bits and pieces needed to 
+// parse a VCF file
+typedef struct {
+  htsFile *fp;
+  bcf_hdr_t *hdr;
+  bcf1_t *rec;
+  hts_idx_t *idx;
+  const char *fname;
+} VcfIterator;
+
+
+typedef struct {
+  std::string filename; // the name of the file being written
+  std::string file_format; // w (vcf) or wb (bcf/vcf.gz)
+  htsFile *fp;
+  bcf_hdr_t *hdr;
+} VcfWriter;
 
 #define NOCALL 0
 #define AA 1
 #define AB 2
 #define BB 3
 
+// the maximum Phred-scaled quality (possible)
+#define MAXQUAL 100
+
 #define DEFAULT_AF -1
 #define MIN_AF 0.0001
 
-#define VERSION "0.01"
+// 0.02 changes
+// New in this version:
+// Fst corrected genotype probability estiamtion
+// and the expanded likeilhood function (moving from formula 5 to formula 3 of Crysup & Woerner)
+#define VERSION "0.02"
 
 // FST ala Hudson using the formulation of:
 // http://www.genome.org/cgi/doi/10.1101/gr.154831.113.
@@ -42,12 +69,15 @@ typedef struct {
 
 #define FST_HUDSON(p,q) (  1.0-( (p*(1.0-p) + q*(1.-q)) / (p*(1.0-q) + q*(1.-p)) )  )
 
+const std::string DEFAULT_FST_TAG = "meanFst";
+
 // -10.0/ln(10)
 // useful when converting log likelihoods (LN)
 // to phred-scaled likelihoods (-10*log10(like))
 const double PHRED_SCALAR = -4.3429448190325175;
 
 const double DEFAULT_MAX_FST=0.05;
+
 
 const char* DEFAULT_AF_TAG="AF";
 
@@ -72,26 +102,28 @@ typedef struct {
   double downsampleFraction; //
   bool filterIndelAdjacent;
   bool help;
-  const char *mixedVcf;
+  bool trustQualities;
+  const char *knownBcf; // known genotypes. at most 1 known contributor
+  const char *lowFstBcf;  // low FST snps; used to estimate MF
   const char *referenceFasta; // needed for cram support.
   char *bamFilename;
   char *bedFilename;
   const char *outCounts;
   std::string outVCF;
-  std::vector<std::string> fstPops; // contains the population allele frequency TAGS (eg, AF_nfe) used to estimate FST
+  std::string fstTag; // contains the population allele frequency TAGS (eg, AF_nfe) used to estimate FST
   double fstFilt;
   const char* AFtag;
-  bool parseVcf; // the "bed" file may either be .bed or .vcf
+  bool parseVcf; // the "bed" file may either be .bed (simulations) or .vcf (real data)
 } Options;
 
 typedef struct {
   char b; // basecall 
-  uint8_t q; // quality;
+  unsigned char q; // quality;
 } BQ;
 
 typedef struct {
-  unsigned refCount; // not really reference; alleles of type 1 or 2. count the number of bases of sufficient quality
-  unsigned altCount;
+  std::vector<unsigned char> refQuals; // not really reference; alleles of type 1 or 2. count the number of bases of sufficient quality
+  std::vector<unsigned char> altQuals; // ditto for the other (alt) allele
   unsigned otherCount; // basecounts that pass filters and are neither type 1 nor type 2 
   unsigned badCount;  // the number of reads at the site that fail the QC filters
 } BaseCounter;
@@ -142,9 +174,6 @@ int getGenoIterators(const std::string &known, char type, int *itr);
 // while adhering to the filters in opt
 bool summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus *loc, BaseCounter &count, Options &opt);
 
-// computes Fst across all pairs of populations (altFreqs)
-// returns the maximum such Fst
-double getMaxFst(std::vector<double>, bool);
 
 
 // ################# IO ROUTINES
@@ -158,7 +187,8 @@ double getMaxFst(std::vector<double>, bool);
 // Note that *results MAY BE NULL
 // if it is, then just the genotypes are extracted.
 // otherwise the DP field is used to populate the BaseCounter object
-void *readVcf(char *fname, std::vector<Locus> &loci, int knownIndex, BaseCounter *results, const char* AFtag);
+void *readLowFstPanel(const char *fname, std::vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag);
+
 bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> &tmpResults, const Options &opt);
 
 // writes the counts data structure to file (plain text)
@@ -177,8 +207,16 @@ bool validNuc(char c);
 #define IS_A(A) (A=='A')
 #define BIALLELIC_WEIGHT(g,f) IS_A( (g)[0])*(f)/2.0 + IS_A((g)[1])*(f)/2.0 + IS_A( (g)[2])*(1.0-(f))/2.0 + IS_A((g)[3])*(1.0-(f))/2.0;
 
+
 // formula 5 from Crysup and Woerner
+// note: this applies to a site (across bases)
 #define LOG_LIKE(NC, NT, w, e) (NC*log(w*(1.-e) + (1.-w)*e/3.0) + NT*log( (1.-w)*(1.-e)+w*(e/3.))  )
+
+// part of formula 3 of Crysup and Woerner
+// namely: w*(Pr(b)|A)
+// note: this applies to a single BASE at a site
+// takes in the weight (w) (real), the qualiy score (byte), and whether or not the base matches the proposed allele (bool)
+#define LIKE_PER_NUC(w, q, m) ( m ? (w)*(1.0-QUAL_2_ERRORPROB[q]) : (w)*(QUAL_2_ERRORPROB[q]/3.0)   )
 
 // log_sum_exp on a pair of log likelihoods (ie, gives log of sum of probabilities)
 // note the 1 is for taking the exp(max-max), which happens implicitly
@@ -192,7 +230,8 @@ bool validNuc(char c);
 void genotypesToAlleleWeights(double mf, double *w);
 
 // computes the 9 likelihoods associated with a pair of counts on A and B alleles
-void computeLikesWithM(int acount, int bcount, double *w, double e, double out[N_GENOS], double altFreq, double fst);
+void computeLikesWithM(const BaseCounter *b, double *w, double e, double out[N_GENOS], double altFreq, double fst, bool trustQualities);
+
 
 
 int csv2vec(const char* s, std::vector<std::string> *vec);
@@ -214,5 +253,20 @@ void die(const char *arg0, const char *extra);
 // parses the argv
 // optionally fills out a Locus struct
 bool parseOptions(char **argv, int argc, Options &opt, Locus &loc);
+
+// takes in a vector of loci (loc), and a bcf file, and adds in the known genotype field.
+// returns the number of genotypes recovered...
+// seeks to each snp position; use this when we estimate the mixture proportion
+unsigned addKnowns(std::vector<Locus> &loci, const char* knownBcf, int knownIndex);
+
+// seeks to the chromosome; linear scan to populate records
+// use this for genotyping (a lot of) snps
+unsigned addKnowns(std::vector<Locus> &loci, const char* knownBcf, int knownIndex, const std::string &chr);
+
+bool getNextVcfRec(VcfIterator &vcf, Locus &loc);
+VcfIterator initVcfIterator(const char *filename, int knownIndex, bool needidx);
+bool closeVcfIterator(VcfIterator &vcf);
+
+char vcfGetGenotype(VcfIterator &vcf, Locus &loc, int knownIndex);
 
 #endif

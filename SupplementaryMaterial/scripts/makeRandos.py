@@ -44,26 +44,9 @@ def getAltFreq(info, tagname):
 
     return -1
 
-# returns a vector of strings (really, the strings are real numbers, but we might as well keep them in string format)
-def getAltFreqSet(info, tagnames):
-    sp = info.split(";")
-    freqs = []
-    for tag in sp:
-        dat = tag.split("=")
-        if len(dat)==2:
-            if dat[0] in tagnames:
-                freqs.append(dat[1])
-
-    if len(tagnames) == len(freqs):
-        return freqs;
-    
-    return list()
-
 
 def main(argv):
 
-    default_pops_tags = "AF_sas,AF_fin,AF_eas,AF_afr,AF_nfe"
-    
     
     parser = argparse.ArgumentParser(description="Let's make some data!\n")
     parser.add_argument('-f', '--alt_allele_frequency', dest='F', help="The (singular) alternative allele frequency modeled (assumes HWE). Default: 0.5",default=0.5, type=float)
@@ -72,7 +55,7 @@ def main(argv):
     parser.add_argument('-G', '--vcf_alt_allele_frequency_tag_to_filter', dest='TAGFILTER', help="Uses the alternative allele frequency from the V/BCF (to LB/UB filter), genotypes come from -F",default="", type=str)
     parser.add_argument('-L', '--vcf_alt_allele_frequency_lower_bound', dest='LB', help="Lower bound on the alt allele frequency from the V/BCF (provide the tag; typically AF. Assumes HWE). Default: 0.0",default=0.0, type=float)
     parser.add_argument('-U', '--vcf_alt_allele_frequency_upper_bound', dest='UB', help="Lower bound on the alt allele frequency from the V/BCF (provide the tag; typically AF. Assumes HWE). Default: 1.0",default=1.0, type=float)
-    parser.add_argument('-w', '--wrights_fst_pops', dest='W', help="e.g., AF_nfe,AF_afr,AF_sas ; reports the alternative allele frequency for the specified populations, using AF_* tags from the VCF file", type=str, default=default_pops_tags)
+    parser.add_argument('-w', '--wrights_fst_tag', dest='W', help="Tag for FST in the INFO field", type=str, default="maxFst")
     parser.add_argument('-q', '--quality', dest='Q', help="The (singular) Phred quality. Default: 20",default=20., type=float)
     parser.add_argument('-s', '--seed', dest='S', help="The prng seed. Default: (seeds from the clock)",default=None, type=int)
     parser.add_argument('-1', '--coverage_person1', dest='C1', help="The coverage (expected read depth) for person 1. Default 30.",default=30., type=int)
@@ -99,7 +82,9 @@ def main(argv):
         exit(1)
 
 
-    popSet = set( results.W.split(",") )
+    #popSet = set( results.W.split(",") )
+
+    fstTag = results.W
     
     random.seed(results.S)# optional determinism
     
@@ -135,8 +120,10 @@ def main(argv):
         if i >= results.M:
             break
 
-        afTags= getAltFreqSet(sp[7], popSet);
-        #print(afTags)
+        fst = getAltFreq(sp[7], results.W)
+        # parsing failure
+        if fst < 0:
+            continue
         
         if results.TAG:
             altFreq = getAltFreq(sp[7], results.TAG)
@@ -208,15 +195,12 @@ def main(argv):
 
         elif results.TAG:
             tags = str(filterFreq)
-            if len(afTags):
-                tags += ',' + ",".join(afTags)
-                
+            tags += "," + str(fst)
             print( sp[0], pos-1, pos, sp[3], sp[4], d1[1] + d2[1], d1[2] + d2[2], nother, tags, d1[0], d2[0], sep="\t")
             
         else:
             tags = str(results.F)
-            if len(afTags):
-                tags += ',' + ",".join(afTags)
+            tags += "," + str(fst)
             
             print( sp[0], pos-1, pos, sp[3], sp[4], d1[1] + d2[1], d1[2] + d2[2], nother, tags, d1[0], d2[0], sep="\t")
                 
