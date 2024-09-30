@@ -93,27 +93,28 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 -t nthreads (reads in the BAM file in parallel; maximum advisable value is 5)
 ```
 <br>
-<br>
+
 ```
 -m min_mapping_quality (ignores reads with mapping quality < M; defaults to 20)
 ```
-<br>
 <br>
 
 ```
 -b min_base_quality (ignores reads with base quality < B; defaults to 20)
 ```
+
 <br>
-<br>
+
 ```
 -i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites
 ```
-<br>
+
 <br>
 
 ```
 -L min_read_length (ignores reads whose (mapped) length < L; default is 30)
 ```
+
 <br>
 <br>
 
