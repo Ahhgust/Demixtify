@@ -36,8 +36,12 @@ Grab the static binary (at present, just the UNIX version is available),
 and the low-fst panel (See Panels/)
 
 <br>
+<br>
+
 For two unknown contributors
 <br>
+<br>
+
 ```
 ./demix -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf > MFfile.tsv
 ```
