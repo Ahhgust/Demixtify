@@ -27,10 +27,10 @@ Demixtify (v0.2) is in active development. Use at your own risk.
 - Use BQSR
   * Demixtify is rather sensitive to biased base q-scores.
   * Consider using BQSR
-    * (GATK)[https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR]
+    * [GATK](https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR)
       * May not erase all signs of DNA damage
-    * (ATLAS)[https://bitbucket.org/wegmannlab/atlas/src/master/]
-      * Untested and is incredibly slow
+    * [ATLAS](https://bitbucket.org/wegmannlab/atlas/src/master/)
+      * Largely untested and incredibly slow (sorry Daniel!)
 - Additionally
   * When working with "balanced" mixtures (perhaps >1:3), you will get drop-out NOT at random.
     * Really, you get drop-out depending on the genotype of the other contributor.
