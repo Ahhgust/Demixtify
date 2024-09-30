@@ -116,11 +116,13 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied a
 ```
 <br>
 <br>
+
 Additional filters (using samflags)
 ```
 -f read_filter (excludes reads according to SAM read filter flags). Default: 0xf04
 -I read_include_filter (includes reads if all filters are met). Default: 0x2
 ```
+
 <br>
 See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 <br>
