@@ -1,67 +1,33 @@
-# Biallelic mixture detection
+# Biallelic mixture interpretation
 When working with forensic samples, one of the first questions to consider is whether or not a sample is a mixture. <br>
-If the sample is a mixture it is also important to know the degree; balanced mixtures may need to be [deconvolved](Deconvolution.md), while if you only wish to characterize the major, you may be able to threshold the minor away.
+Demixtify (v0.2) estimates the mixture fraction; using this mixture fraction, it then deconvolves the mixture.
 
-At present, _Demixtify_ can be used to estimate the mixture fraction. Future versions will also (optionally) perform deconvolution.
+### Limitations
+- Demixtify is only for interpretting biallelic SNPs (as in, not indels).
+  * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-), but the performance of splitting needs assessment.
+- Demixfity is only for deconvolving two-person mixtures.
+  * Note that a three-person mixture (in truth) will better fit the hypothesis of a two-person mixture than that of a single-source sample.
+- When deconvolving a very large number of sites, Demixtify can be a bit slow.
+  * (Blame htslib's seek function; future versions will just stream the data)
 
-<br>
-<br>
+### Recommendations
 
-1. * Input your mixed sample
-     * Processed \BAM file format
-       * At a minimum, duplicates should be marked (or removed).
-2. * Provide a B/VCF file. 
-     * This is a "sites only" VCF file
-     * Some recommended files are found in [SupplementaryMaterial](SupplementaryMaterial)
-       * Choose [hg38](SupplementaryMaterial/hg38) ("chr" chromosome naming, likely from UCSC) OR
-       * or [grch38](SupplementaryMaterial/grch38) (no "chr"; the naming favored by ensembl)
-	 
+Demixtify (v0.2) is in active development. Use at your own risk.
 
-<br>
-<br>
-Demixtify will then estimate:
-
-* The (log) likelihood of the mixture fraction (mf)
-   * Over a range of values for mf
-
-# Quick start (*nix systems only)
-## Unix system, using static binaries
-
-Clone this repository, and put it in your _src_ directory.
-```
-cd ~
-mkdir -p src bin
-cd src
-git clone  https://github.com/Ahhgust/Demixtify.git
-```
-
-Put _Demixtify_ in your _bin_! (you may need to add $HOME/bin to your PATH.)
-<br>
-For example:
-
-```
-cp Demixtify/binaries/Nix/demix ~/bin
-```
-
-And estimate the mixture fraction
-```
-demix -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
-```
-_this will take a few minutes_
+- Either use
+  * Genotype imputation (GLIMPSE or Beagle 4.1 are recommended) OR
+    * EG, the output of Demixtify is the input to GLIMPSE
+    * In which case, you want to type a very LARGE number of SNPs
+  * Genotyping by maximum likelihood.
+    * In which case considering sites in an array is recommended.
+    * Filtering on the genotype quality is also recommended.
+- Additionally
+  * When working with "balanced" mixtures (perhaps >1:3), you will get drop-out NOT at random.
+    * Really, you get drop-out depending on the genotype of the other contributor.
+    * This often presents as a "matchy" profile in tools like GEDmatch. (even without imputation).
+  * It should be stressed that genotype "accuracy" probably isn't the best metric to consider.
 
 
-Demixtify also has (limited) parallel support. The computation is IO bound (ie, it takes a few seconds to estimate the MF, and a few minutes to read the bam).
-You can also read the BAM file in parallel, using 4 threads for example:
-```
-demix -t 4 -b YOURBAM.bam -v ~/src/Demixtify/SupplementaryMaterial/hg38/GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf > mf.tsv
-```
-
-Note, if you are assessing many files at once it is better to NOT use multithreading-- in the end, you're limited to the speed of the disk; once that pipe is full,
-adding more threads will just make things go that much slower.
-
-See the documentation [here](MFfile.md) to see how to work with the mixture fraction estimates.
-
-<br>
 
 ## Flags and options
 
@@ -106,9 +72,9 @@ See description [here](https://broadinstitute.github.io/picard/explain-flags.htm
 
 ## Exome sequencing
 
-We also provide files for mixture detection in whole exome sequencing data.<br>
+We also provide files for mixture detection/deconvolution in whole exome sequencing data.<br>
 See: [hg38](SupplementaryMaterial/hg38), and look for files with  "exome100bppad"  in the name.
-
+Note, these files have only been tested for mixture detection (ie, v0.1 of the software)
 
 <br>
 
