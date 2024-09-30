@@ -24,6 +24,13 @@ Demixtify (v0.2) is in active development. Use at your own risk.
   * Genotyping by maximum likelihood.
     * In which case considering sites in an array is recommended.
     * Filtering on the genotype quality is also recommended.
+- Use BQSR
+  * Demixtify is rather sensitive to biased base q-scores.
+  * Consider using BQSR
+    * (GATK)[https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR]
+      * May not erase all signs of DNA damage
+    * (ATLAS)[https://bitbucket.org/wegmannlab/atlas/src/master/]
+      * Untested and is incredibly slow
 - Additionally
   * When working with "balanced" mixtures (perhaps >1:3), you will get drop-out NOT at random.
     * Really, you get drop-out depending on the genotype of the other contributor.
@@ -33,7 +40,7 @@ Demixtify (v0.2) is in active development. Use at your own risk.
 ### Quick start
 
 Grab the static binary (at present, just the UNIX version is available),
-and the low-fst panel (See Panels/)
+and the low-fst panel. See: [Panels](Panels/)
 
 <br>
 <br>
@@ -43,10 +50,11 @@ For two unknown contributors
 <br>
 
 ```
-./demix -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf > MFfile.tsv
+./demix -B -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf > MFfile.tsv
 ```
 
-For interpretting the MF-file, see [this] ( MFfile.md )
+For interpretting the MF-file, see [this](MFfile.md)
+
 
 ## Flags and options
 
