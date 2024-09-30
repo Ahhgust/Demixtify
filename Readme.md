@@ -3,12 +3,15 @@ When working with forensic samples, one of the first questions to consider is wh
 Demixtify (v0.2) estimates the mixture fraction; using this mixture fraction, it then deconvolves the mixture.
 
 ### Limitations
-- Demixtify is only for interpretting biallelic SNPs (as in, not indels).
+- Demixtify is only for interpretting autosomal biallelic SNPs (as in, not indels).
   * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-), but the performance of splitting needs assessment.
 - Demixfity is only for deconvolving two-person mixtures.
   * Note that a three-person mixture (in truth) will better fit the hypothesis of a two-person mixture than that of a single-source sample.
 - When deconvolving a very large number of sites, Demixtify can be a bit slow.
   * (Blame htslib's seek function; future versions will just stream the data)
+- BCF Only
+  * Any input file needs to be *indexed* and in the *BCF* file format. .vcf.gz is not supported.
+  * (this, in my mind, is a bug in htslib)
 
 ### Recommendations
 
@@ -27,7 +30,19 @@ Demixtify (v0.2) is in active development. Use at your own risk.
     * This often presents as a "matchy" profile in tools like GEDmatch. (even without imputation).
   * It should be stressed that genotype "accuracy" probably isn't the best metric to consider.
 
+### Quick start
 
+Grab the static binary (at present, just the UNIX version is available),
+and the low-fst panel (See Panels/)
+
+<br>
+For two unknown contributors
+<br>
+```
+./demix -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf > MFfile.tsv
+```
+
+For interpretting the MF-file, see [this] ( MFfile.md )
 
 ## Flags and options
 
