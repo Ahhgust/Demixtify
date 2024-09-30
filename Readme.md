@@ -42,8 +42,6 @@ Demixtify (v0.2) is in active development. Use at your own risk.
 Grab the static binary (at present, just the UNIX version is available),
 and the low-fst panel. See: [Panels](Panels/)
 
-<br>
-<br>
 
 For two unknown contributors
 <br>
@@ -54,7 +52,39 @@ For two unknown contributors
 ```
 
 For interpretting the MF-file, see [this](MFfile.md)
+Note that the -B option uses the base-quality scores; without it, Demixtify defaults to assuming a FIXED base quality.
 
+
+For one known contributor
+<br>
+<br>
+
+```
+./demix -B -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf -k knownContributor.bcf > MFfile.tsv
+```
+
+The `knownContributor.bcf` is assumed to be a single-sample BCF file. If it's multisample, you can specify -K (the index of the sample; defaults to 1, the 1st individual in the BCF)
+
+### Multicore support
+
+Demixtify can be distrubuted.
+<br>
+<br>
+
+```
+./demix -B -t 4 -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  (-k knownContributor.bcf) > MFfile.tsv
+```
+() are optional
+-t specifyings 4 threads for reading the file.
+<br>
+Note the lack of output file (-o) forces Demixtify to assess the mixture fraction.
+You can then specify the mixture fraction a la:
+<br>
+<br>
+```
+./demix -B -F 0.1  -v SitesToGenotype.chr1.bcf  -b YOURBAM.bam -o YOURBAM.chr1.bcf  (-k knownContributor.bcf)
+```
+(and then use chromosome-level parallelism)
 
 ## Flags and options
 
