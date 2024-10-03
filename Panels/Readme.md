@@ -20,6 +20,12 @@ We *highly* recommend using this panel to infer the mixture proportion/fraction;
 <br>
 This panel was made by vcf2panel.py, which adds an estimate of FST (Weir and Hill, 2002). In our studies we found that the mean pairwise FST (i.e., average of ratios) performed better than the "overall" (i.e., ratio of averages) FST (in terms of false positives for mixture detection).
 
+# hg19 support
+Our analyses natively consider the hg38 reference genome. hg19 versions of (some of) the files are provided as well. In brief, the hg19 files were lifted over from hg38 (Picard); The following flags were set: <br>
+--WARN_ON_MISSING_CONTIG true  --WRITE_ORIGINAL_POSITION true --WRITE_ORIGINAL_ALLELES true --RECOVER_SWAPPED_REF_ALT true  --VALIDATION_STRINGENCY LENIENT --LIFTOVER_MIN_MATCH 0.95 <br>
+Additionally, the file was filtered to ensure that the hg38 and hg19 chromosomes agreed.
+
+
 <br>
 
 The second panel is user-defined. We provide a useful subset of the GSA (Illumina's global screening array); we recommend this for calling marginal genotypes. We also provide sites that are useful for genotype imputation/refinement. This is highly recommended if the coverage (for the relevant contributor) is low (say, <10x).
