@@ -95,6 +95,10 @@ die(const char *arg0, const char *extra) {
     "Options " << endl <<
 
     "\t-h (prints this message) " << endl << endl <<
+    
+    "RGA" << endl <<
+    "\t\t-e 0.001 (Optional; fixed error rate)" << endl<< endl <<
+    
     "Reading BAMs..." << endl <<
     "\t-b bamFile or cramFile (Required; input)" << endl <<
     "\t\t-T referenceFasta (input; needed for CRAM only)" << endl <<
@@ -142,6 +146,8 @@ validNuc(char c) {
 bool
 parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	int i = 1;
+	
+	opt.fixed_errorrate=-1.0;
 	
 	opt.filter=DEFAULT_READ_FILTER;//(BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP);
 	opt.include_filter=DEFAULT_READ_INCLUDE_FILTER;
@@ -200,7 +206,9 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      ++errors;
 	      break;
 	    }	
-	    if (flag == 'q') {
+	    if (flag == 'e') {
+	      opt.fixed_errorrate =   max(atof(argv[i]), 0.0000001);
+	    } if (flag == 'q') {
 	      opt.minBaseQuality = max(atoi(argv[i]), 0); // make this unsigned-friendly
 	    } else if (flag == 'Q') {
 	      opt.maxBaseQuality = max(atoi(argv[i]), 0); // make this unsigned-friendly
@@ -2431,13 +2439,21 @@ main(int argc, char **argv) {
     } // IO is complete; either single thread or multithreaded
 
     double error = pow(10, opt.maxBaseQuality/-10.0);
-
+    bool fixed_error_provided = opt.fixed_errorrate >= 0. & opt.fixed_errorrate < 1.0; // option not given, thus still -1
+    
+    if (fixed_error_provided) {
+      error = opt.fixed_errorrate;
+    }
 
     double mf_hat = opt.mixtureFraction;
     if (opt.mixtureFraction < 0.) {
       mf_hat = estimateMF_1Thread(results, &loci, &opt, error);
-      error = estimateError(results, loci.size(), error);
-    }
+      
+      // only estimate if necessary
+      if (!fixed_error_provided) {
+        error = estimateError(results, loci.size(), error);
+      }
+    }    
 
     /* very memory efficient, but wayyyy to slow. let's try this again.
     if (opt.outVCF != ""){
