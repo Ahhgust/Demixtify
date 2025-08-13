@@ -56,6 +56,8 @@ def main(argv):
     parser.add_argument('-L', '--vcf_alt_allele_frequency_lower_bound', dest='LB', help="Lower bound on the alt allele frequency from the V/BCF (provide the tag; typically AF. Assumes HWE). Default: 0.0",default=0.0, type=float)
     parser.add_argument('-U', '--vcf_alt_allele_frequency_upper_bound', dest='UB', help="Lower bound on the alt allele frequency from the V/BCF (provide the tag; typically AF. Assumes HWE). Default: 1.0",default=1.0, type=float)
     parser.add_argument('-w', '--wrights_fst_tag', dest='W', help="Tag for FST in the INFO field", type=str, default="maxFst")
+    parser.add_argument('-x', '--wrights_fst_tag_maximum', dest='X', help="Never report a FST larger than X",  default=1, type=float)
+    parser.add_argument('-y', '--wrights_fst_tag_maximum_skip', dest='Y', help="Drop markers with FST larger than Y",  default=10, type=float)
     parser.add_argument('-q', '--quality', dest='Q', help="The (singular) Phred quality. Default: 20",default=20., type=float)
     parser.add_argument('-s', '--seed', dest='S', help="The prng seed. Default: (seeds from the clock)",default=None, type=int)
     parser.add_argument('-1', '--coverage_person1', dest='C1', help="The coverage (expected read depth) for person 1. Default 30.",default=30., type=int)
@@ -82,8 +84,8 @@ def main(argv):
         exit(1)
 
 
-    #popSet = set( results.W.split(",") )
-
+        #popSet = set( results.W.split(",") )
+    minFst=0.001
     fstTag = results.W
     
     random.seed(results.S)# optional determinism
@@ -121,9 +123,14 @@ def main(argv):
             break
 
         fst = getAltFreq(sp[7], results.W)
-        # parsing failure
-        if fst < 0:
+
+        if fst < minFst:
+            fst=minFst
+        if fst > results.Y:
             continue
+        
+        if fst > results.X:
+            fst = results.X
         
         if results.TAG:
             altFreq = getAltFreq(sp[7], results.TAG)
@@ -150,7 +157,12 @@ def main(argv):
             pHom = pAlt+pRef
         
         d2 = getCounts(c2, pError, pRef, pHom)
-
+            
+        # optimization; if 0 reads are reported, skip the marker
+        if d1[1] + d1[2] + d2[1] + d2[2] == 0:
+            continue
+            
+        
         pos = int(sp[1])
         if pos == prevpos:
             continue

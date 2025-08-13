@@ -10,13 +10,20 @@
 typedef struct {
   std::string region;
   uint32_t pos;
-  char allele1;
-  char allele2;
-  char genotypecall;
   float af; // population allele frequency; defaults to DEFAULT_AF
   float Fst; // estimator of FST; in practice, the "mean" pairwise (expectation of ratios) works the best (as opposed to typical estimator; ratio of expectatinos)
+  char allele1;
+  char allele2;
+  char genotypecall; // kludge. used to house known genotypes. 
 } Locus;
 
+
+typedef struct {
+  uint32_t locIndex;
+  std::string readname;
+  char basecall;
+  unsigned char quality;
+} PileupReader;
 
 // the bits and pieces needed to 
 // parse a VCF file
@@ -113,6 +120,7 @@ typedef struct {
   std::string fstTag; // contains the population allele frequency TAGS (eg, AF_nfe) used to estimate FST
   double fstFilt;
   const char* AFtag;
+  float maxFst; // FSTs are capped at this value
   bool parseVcf; // the "bed" file may either be .bed (simulations) or .vcf (real data)
 } Options;
 
@@ -187,7 +195,7 @@ bool summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, 
 // Note that *results MAY BE NULL
 // if it is, then just the genotypes are extracted.
 // otherwise the DP field is used to populate the BaseCounter object
-void *readLowFstPanel(const char *fname, std::vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag);
+void *readLowFstPanel(const char *fname, std::vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, float maxFst);
 
 bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> &tmpResults, const Options &opt);
 
@@ -231,7 +239,6 @@ void genotypesToAlleleWeights(double mf, double *w);
 
 // computes the 9 likelihoods associated with a pair of counts on A and B alleles
 void computeLikesWithM(const BaseCounter *b, double *w, double e, double out[N_GENOS], double altFreq, double fst, bool trustQualities);
-
 
 
 int csv2vec(const char* s, std::vector<std::string> *vec);

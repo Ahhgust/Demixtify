@@ -7,6 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <deque>
 #include <set>
 #include <chrono>
 
@@ -113,6 +114,7 @@ die(const char *arg0, const char *extra) {
     "\t-p panelFile.bcf (a panel of low-FST markers)" << endl <<
     "\t\t-w threshold on Wright's FST (discards markers with FST>threshold)" << endl<<
     "\t\t-W tag in the INFO field providing FST (meanFst is the default)" << endl<<
+    "\t\t-C FSTs are not permitted to be larger than this (1.0 default)" << endl<<
     "\t\t-a aftag (the tag to use in the VCF file to get the allele frequency. defaults to AF" << endl<<
     "\t\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
     "\t\t-F fraction (the mixture fraction; if unspecified, this is estimated)" << endl << endl <<
@@ -162,7 +164,9 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.help=false;
 	opt.parseVcf=false;
 	opt.trustQualities=false;
-	opt.fstFilt=-1.; // any negative number specifies no FST filter. otherwise, it's the maximum Fst permitted
+	opt.fstFilt=-1.; // any negative number specifies no FST filter. otherwise, it's the maximum Fst permitted (other markers are dropped)
+	opt.maxFst=1.0; // this CAPs the Fst to be no larger than this (marker is kept)
+	
 	opt.ngrid=DEFAULT_NGRID;
 	opt.numThreads=1;
 	opt.mixtureFraction=-1.0;
@@ -232,6 +236,8 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 		cerr << "The downsampling fraction must be between 0 and 1!" << endl;
 		++errors;
 	      }
+	    } else if (flag == 'C') {
+	      opt.maxFst=max(atof(argv[i]), 0.); // maximum FST permitted when estimating the mixture fraction
 	    } else if (flag == 'w') {
 	      opt.fstFilt= max(atof(argv[i]), 0.); // maximum FST permitted when estimating the mixture fraction
 	    } else if (flag == 't') {
@@ -312,12 +318,6 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	  }
 
 	}
-
-	if (opt.lowFstBcf==NULL) {
-	  cerr << "I need a panel of low-fst SNPs..." << endl;
-	  ++errors;
-	}
-		
 
 	if (errors)
 	  return false;
@@ -528,6 +528,422 @@ getSeq(char* buf, const uint8_t *s, int len) {
   buf[i] = 0;
 }
 
+/*
+  Takes two coordinates (cstyle strings)
+  eg chr1:100-2000
+  and returns true IFF they refer to the same chromosome
+ */
+bool
+sameChrom(const char *loc1, const char *loc2) {
+
+  while (*loc1 && *loc2) {
+    
+    if (*loc1 == *loc2) {
+      if (*loc1==':')
+	return true;
+      
+    } else {
+      break;
+    }
+    ++loc1;
+    ++loc2;
+  }
+  return false;
+}
+
+/*
+  Helper function
+  region is a Locus (chr1:100-200)
+  chrom is a chromosome name (chr1)
+  the "match" is the chromosomes are the same.
+
+ */
+bool
+matchRegToChrom(const char *reg, const char *chrom) {
+  const char *p = chrom;// just a prefix match. chr1 for example
+  const char *s = reg;
+  while (*p && *s) {
+    if (*p != *s)
+      break;
+    
+    ++p;
+    ++s;
+  }
+    
+  if (!*p && *s==':')
+    return true;
+
+  return false;
+}
+
+
+// sort callback
+// descending order by locus index.
+
+bool
+comparePiles(const PileupReader &a, const PileupReader &b) {
+  if (a.locIndex != b.locIndex)
+    return b.locIndex < a.locIndex;
+  
+  return a.readname < b.readname;  
+}
+
+/*
+  Converts a "pileup" into the basis of a genotype (qscores associated with ref and alt alleles; these come from Locus).
+  (fills out the BaseCounter).
+  Only locus locusIndex counts are evaluated.
+  pile is sorted (by locus, descending, and read-pair to put read-pairs together)
+  and emptied/cleared of records associated with the specified locus.
+  
+ */
+void
+processLocus(BaseCounter *count, std::vector<PileupReader> &pile, Locus *loc, uint32_t locusIndex, Options &opt) {
+
+  uint32_t i, resizeIndex=0;
+  if (pile.size() == 0)
+    return;
+
+  PileupReader *a, *b;
+  char c;
+  unsigned char q;
+  
+  count->badCount=count->otherCount=0;
+    
+  // sort vector by index, then read name. paired-end overlaps will be adjacent.
+  std::sort(pile.begin(), pile.end(), comparePiles);
+  
+  
+  for (i=pile.size() -1 ; true; --i) {
+    a = &pile[i];
+    if (a->locIndex > locusIndex) { // sorted descending by locus; as such, implies the remainder of the records are assocaited w/ other loci
+      resizeIndex=i+1;
+      break;
+    }
+	
+    if (a->locIndex != locusIndex) {
+      cerr << "Assertion failed. " << a->locIndex << " " << locusIndex << endl;
+      exit(1);
+    }
+    
+    b=NULL;
+    if (i>0)
+      b = &pile[i-1];
+      
+    c = a->basecall;
+    q = a->quality;
+    // overlapping read-pair. 
+    if (b != NULL && b->locIndex == locusIndex &&  a->readname == b->readname) {
+
+      if (b->quality > q) { // pick the higher quality basecall
+	q = b->quality;
+	c = b->basecall;
+      }
+      --i;
+    }
+
+    // easy-peasy downsampling implemented here.
+    if (opt.downsampleFraction < 1.0 &&  static_cast<double>( rand() )/RAND_MAX < opt.downsampleFraction) {
+      if (i==0)
+	break;
+      
+      continue;
+    }
+    
+    if (c == loc->allele1) {
+      count->refQuals.push_back( q );
+    } else if (c==loc->allele2) {
+      count->altQuals.push_back( q );
+    } else {
+      ++(count->otherCount);
+    }
+    
+    if (i==0)
+      break;
+  }
+
+  // all records are stale.
+  if (resizeIndex==0) {
+    pile.clear();
+  } else if (resizeIndex <  pile.size()) { // last n records are stale.
+    pile.resize(resizeIndex);
+  }
+
+
+}
+
+uint32_t
+summarizeAllRegions(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, std::vector<Locus> &loci, BaseCounter *counts, Options &opt) {
+
+  int coord, unused;
+  uint32_t i, currLIndex=0;
+  
+  hts_itr_t *iter;    // initiate an iterator
+  if (loci.size() < 1) {
+    cerr << "No loci sought? That doesn't sound right..." << endl;
+    return 0;
+  }
+
+  std::vector<std::pair<int32_t, int64_t>> locusCoords;
+  locusCoords.reserve( loci.size() );
+
+
+  /* converts genomic loci (chr1:100-100) into HTSlib equivalents 
+     PITA for bam, as it happens */
+
+  int32_t chromIndex=0;
+  for ( ; chromIndex < header->n_targets ; ++chromIndex) {
+    bool match=  matchRegToChrom(loci[0].region.c_str(), header->target_name[ chromIndex ]);
+    if (match) {
+      break;
+    }
+  }
+  
+  if (chromIndex == header->n_targets) {
+    cerr << "Chromosome lookup failed" << endl;
+    exit(1);
+  }
+
+  
+  // locusCoords are a parallel array to loci, providing the htslib equivalent to the genomic coords.
+  // locusCoords are much easier to consider for operations like <
+  for (std::vector<Locus>::iterator it = loci.begin(); it != loci.end(); ++it) {
+    hts_parse_reg( (it->region).c_str(),  &coord, &unused);
+    
+    if (! matchRegToChrom((it->region).c_str(), header->target_name[ chromIndex ] )) { // false is common case.
+
+      for ( ;! matchRegToChrom((it->region).c_str(), header->target_name[ chromIndex ] ); ++chromIndex)
+	;
+
+      if (chromIndex == header->n_targets) {
+	cerr << "Chromosome lookup failed" << endl<<it->region << endl;
+	exit(2);
+      }   
+    }
+
+    locusCoords.emplace_back( chromIndex, coord);
+  }
+
+  
+  // performance eval: this filters reads to intersect the regions listed.
+  // however, is it worth the walk? Or is it better to just linearly scan?
+  const char **regarray = new const char* [ loci.size() ];
+  for (i=0; i < loci.size(); ++i)
+    regarray[i]=loci[i].region.c_str();
+
+
+  // new function; seek to all positions listed.
+  iter  = sam_itr_regarray(idx, header, const_cast<char**>(regarray), loci.size() );
+  if (iter==NULL) {
+    cerr << "HTSlib failed to parse the regions specified" << endl << "e.g., " <<  loci[0].region << endl;
+    exit(1);
+  }
+  
+  cerr << "Bam parsing begin" << endl;
+
+
+  int offset;
+  uint32_t *cigar;
+  int64_t lpos, refPos, readPos, prevOp, lenCigBlock, op, len;
+  
+  int32_t lchromIndex; // chromosome indexes; loci must be sorted by chromIndex, position
+  
+  unsigned cigInd, lOffset;
+
+  bool getNextLocus=false;
+
+  std::vector<PileupReader> pile;
+  /*
+typedef struct {
+  uint32_t locIndex;
+  std::string readname; // deep copy of memory necessary.
+  char basecall;
+  unsigned char quality;
+} PileupReader;
+   */
+  // every read that overlaps at least one locus of interest
+  while ( sam_itr_next(in, iter, b) >= 0) {
+    bam1_core_t core = b->core;
+    
+    if ( (core.flag & opt.filter) || opt.include_filter != (core.flag & opt.include_filter) ) {
+      continue;
+    }
+    len = core.l_qseq; //length of the read.
+    if (len < opt.minReadLength)
+      continue;
+    
+    uint32_t q2 = core.qual; //mapping quality
+    if (q2 < opt.minMapQuality)
+      continue;
+
+    lOffset=0;
+
+    // locus chrom and position
+    lchromIndex = locusCoords[ currLIndex].first;
+    lpos = locusCoords[ currLIndex ].second;
+    refPos = core.pos; // note, like coord, this is 0-based
+    
+        // at this point, we can only say if a locus is before the current read.
+    // if so. let's clear out every locus whose information precedes this read.
+    while (lchromIndex < core.tid || 
+	   (core.tid==lchromIndex && lpos < refPos)) {
+
+
+      processLocus( &counts[ currLIndex  ],
+		    pile,
+		    &(loci[currLIndex ]),
+		    currLIndex,
+		    opt);
+      
+
+      // one locus was consumed. No more data are possible for it.
+      ++currLIndex; // double check
+      if (currLIndex  >= loci.size()) {  // last locus
+	break;
+      }
+      
+      lchromIndex = locusCoords[ currLIndex].first;
+      lpos = locusCoords[ currLIndex ].second;
+    }
+    
+    if (currLIndex  >= loci.size())  // last locus
+      break;
+
+    uint8_t *s = bam_get_seq(b); //base string
+    uint8_t *qual = bam_get_qual(b); // quality string (need to +33 to convert to char)
+
+    cigar =bam_get_cigar(b);
+    
+    // for every locus that intersects this read...
+    // common case, this doesn't loop. ie, 1 read corresponds to 1 locus.
+    // since c++ doesn't support named/labeled continue statements, goto it is.
+    // and for those that say goto is "bad", loops are (implemented as) gotos. So... loops are bad too?!
+  nextlocus:
+
+    if (getNextLocus) {
+      
+      ++lOffset;
+      getNextLocus=false;
+      if (currLIndex + lOffset >= loci.size()) {// last locus
+	continue; // but more reads yet overlap it, so we continue
+      }
+    }
+    
+    // locus chrom and position
+    lchromIndex = locusCoords[ currLIndex + lOffset ].first;
+    lpos = locusCoords[ currLIndex + lOffset ].second; 
+      
+    prevOp=-1;
+
+    // the read info
+    refPos = core.pos;
+
+    coord=lpos;
+
+    for (cigInd = readPos = 0; cigInd < core.n_cigar; ++cigInd) {
+      
+      lenCigBlock = cigar[cigInd]>>BAM_CIGAR_SHIFT;
+      op          = cigar[cigInd]&BAM_CIGAR_MASK;
+
+      if (op == BAM_CMATCH || op == BAM_CEQUAL || op == BAM_CDIFF) {
+
+	// current cigar block overlaps with the region of interest
+	if (coord >= refPos && coord < (refPos + lenCigBlock) ) {
+
+	  offset = coord - refPos;
+
+	  // be wary of sites adjacent to alignment oddities.
+	  if (opt.filterIndelAdjacent) {
+	    // first base of block, treat as adjacent to indel unless there are adjacent M operators...
+	    if (offset==0) {
+	      if (prevOp ==-1 || !(prevOp == BAM_CMATCH ||  prevOp == BAM_CEQUAL || prevOp == BAM_CDIFF)) {
+
+		getNextLocus=true;
+		goto nextlocus;	 
+	      }
+	    } else if (offset == lenCigBlock-1) {
+
+	      // last base in the block. We're skipping indel-adjacent sites; that includes if it's the last base in the (aligned portion of) the read
+	      // OR 
+	      // if the next cigar operation is not a "match" (including equivalent operators)
+	      if (cigInd==core.n_cigar-1) {
+
+		getNextLocus=true; // snp position overlaps, but not in a position we care to use.
+		goto nextlocus;	
+	      } 
+	      int nextOp =  cigar[cigInd+1]&BAM_CIGAR_MASK;
+	      if (nextOp != BAM_CMATCH && nextOp != BAM_CEQUAL && nextOp != BAM_CDIFF) {
+
+		getNextLocus=true;
+		goto nextlocus;	
+	      }
+	      
+	    }
+	  }
+	  
+	  if (offset + readPos >= len) {
+	    cerr << "Problem parsing cigar string: " << core.pos << "\t" << bam_get_qname(b) << endl;
+	    getNextLocus=true;
+	    goto nextlocus;	
+	  }
+	  // base quality is too low...
+	  if (qual[offset+readPos] < opt.minBaseQuality) {
+	    getNextLocus=true;
+	    goto nextlocus;	
+	  }
+
+	  // not a block boundary; let's trust this value.
+	  pile.emplace_back(  PileupReader{
+	      (uint32_t)(currLIndex + lOffset), // which locus
+		std::string( bam_get_qname(b) ), // name of read; need fresh memory alloc
+		"=ACMGRSVTWYHKDBN"[bam_seqi(s,offset+readPos)], // basecall
+		qual[offset+readPos] // quality
+		}
+	    );
+
+	  getNextLocus=true;
+	  goto nextlocus;	
+	}
+		  
+        refPos += lenCigBlock;
+	readPos += lenCigBlock;
+      } else if (op == BAM_CSOFT_CLIP) {
+        readPos += lenCigBlock;
+      } else if (op == BAM_CINS) {
+	readPos += lenCigBlock;
+      } else if (op == BAM_CDEL) {
+	refPos += lenCigBlock;
+      } else if (op == BAM_CREF_SKIP) {
+	refPos += lenCigBlock;
+      } // for our purposes, BAM_CPAD adjusts neither ther reference nor the read, ditto with hard clipping
+	  
+      prevOp=op;
+    } // cigar parsing...
+
+
+  } // next read.
+  // TODO: parse trailing loci.
+
+  while(currLIndex  < loci.size()) {  // last locus
+
+
+    processLocus( &counts[ currLIndex  ],
+		  pile,
+		  &(loci[currLIndex ]),
+		  currLIndex,
+		  opt);
+      
+
+    // one locus was consumed. No more data are possible for it.
+    ++currLIndex; // double check
+      
+  }
+    
+  delete[] regarray;
+  hts_itr_destroy(iter);  
+  return currLIndex; // returns the number of parsed loci.
+}
+
+
 
 bool
 summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus *loc, BaseCounter &count, Options &opt) {
@@ -712,7 +1128,7 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
       } // for our purposes, BAM_CPAD adjusts neither ther reference nor the read, ditto with hard clipping
 	  
       prevOp=op;
-    }
+    } // cigar loop
 	
     ++tot;
   }
@@ -875,8 +1291,6 @@ computeLikesWithM(const BaseCounter *b, double *w, double e, double out[N_GENOS]
       // and yes, given HWE I can just compute the log geno probability directly...
       c = POSSIBLE_GENOS[i].c_str();
 
-
-
       if (fst > 0.0)
       	f = GENOPROBFST(c, altFreq, fst);
       else
@@ -1001,7 +1415,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     it = loci->begin();
     c = counts;
     for (j=0; j < nLoci; ++j, ++it, ++c) {
-      // equivalent to != SKIP_SNP and != IGNORE_SNP
+
       if (c->badCount < IGNORE_SNP && c->refQuals.size() + c->altQuals.size() > 0) {
 
 	computeLikesWithM(c, aweights, error, genolikes, it->af, it->Fst,opt->trustQualities);
@@ -2272,7 +2686,6 @@ main(int argc, char **argv) {
   
   bcf_hdr_t *header=NULL;
   
-
   // used for testing purposes almost exclusively; just prints the base-count stats of 1 locus.
   if (loc.region.length()) {
     BaseCounter result;
@@ -2312,10 +2725,9 @@ main(int argc, char **argv) {
     vector<BaseCounter> tmpResults;
     
     if (opt.parseVcf) {
-      if (NULL == (header= (bcf_hdr_t*)readLowFstPanel(opt.lowFstBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str())) ) {
+      if (NULL == (header= (bcf_hdr_t*)readLowFstPanel(opt.lowFstBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str(), opt.maxFst)) ) {
 	die(argv[0], "Failed to parse the vcf file ... ");
       }
-      
       results = new BaseCounter[ loci.size() ];
 
       if (opt.knownBcf != NULL && opt.mixtureFraction < 0.) {
@@ -2350,7 +2762,6 @@ main(int argc, char **argv) {
     }
 
     if (opt.numThreads==1) {
-      int i=0;
       
       // borrowed from: https://dearxxj.github.io/post/5/
       // non-threaed version; open the bam file in main
@@ -2371,16 +2782,31 @@ main(int argc, char **argv) {
 	cerr << "Failed to load index" << endl;
 	return -1;
       }
+      cerr << " begin summarize\n";
 
+      // this does a single seek.
+
+      if (opt.mixtureFraction < 0.)
+	summarizeAllRegions(in, b, header, idx, loci, results, opt);
+
+
+      /*
+      // this works too, but is horribly slow. Uses a seek in the bam for each snp
       if (opt.mixtureFraction < 0.) {
+	int i=0;
 	for (std::vector<Locus>::iterator it = loci.begin(); it != loci.end(); ++it, ++i) {
 
 	  if (! summarizeRegion(in, b, header, idx, &(*it), results[i], opt)) {
 	    cerr << "Skipping region " << loc.region << endl; // when this happen results[i].bad == UINT_MAX
 	  }
+	  //	  if (i % 100000 ==0)
+	  //cerr << ".";
 	}
       }
+      */
 
+      
+      cerr << " end summarize\n";
       bam_destroy1(b);
       bam_hdr_destroy(header);
       sam_close(in);
@@ -2432,13 +2858,21 @@ main(int argc, char **argv) {
 
     double error = pow(10, opt.maxBaseQuality/-10.0);
 
-
     double mf_hat = opt.mixtureFraction;
     if (opt.mixtureFraction < 0.) {
       mf_hat = estimateMF_1Thread(results, &loci, &opt, error);
       error = estimateError(results, loci.size(), error);
+      //  false only iff simulation. in which case, we don't write to file.
+      // todo; generalize
+      if (!opt.parseVcf)
+	exit(0);
     }
 
+    // bedfilename is overloaded to also be the name of the SNP panel filename.
+    // when null, we aren't deconvovling anything
+    if ( opt.bedFilename==NULL)
+      exit(0);
+    
     /* very memory efficient, but wayyyy to slow. let's try this again.
     if (opt.outVCF != ""){
       writeVcf(mf_hat, error, &loci, opt);
@@ -2644,7 +3078,7 @@ vcfGetGenotype(VcfIterator &vcf, Locus &loc, int knownIndex) {
 // input files may either be of type bed (uncompressed) or
 // something that hts_open can read (bcf/vcf/vcf.gz would make sense)
 void *
-readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag) {
+readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, float maxFst) {
 
   htsFile *fp    = hts_open(fname,"r");
   if (fp==NULL) {
@@ -2682,7 +3116,7 @@ readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, co
       if (bcf_get_info_float(hdr, rec, fstTag, &af, &naf) < 0) {
 	continue;
       } else {
-	loc.Fst= af[0];
+	loc.Fst= min(af[0], maxFst);
       }
       
       // convert the internal (int-based) chromosome representation into its string equivalent

@@ -13,22 +13,9 @@ import os
 def get_pbar(n1, n2, p1, p2):
     return ((n1*p1) + (n2*p2)) / (n1 + n2)
 
-#
-# On second thought, let's just use the Hudson estimator.
-# from demix:
-# #define FST_HUDSON(p,q) (  1.0-( (p*(1.0-p) + q*(1.-q)) / (p*(1.0-q) + q*(1.-p)) )  )
-
-def fstHudson(p,q):
-    if p + q <= 0. or p + q >= 2.0:
-        return 1
-
-    return 1.0-( (p*(1.0-p) + q*(1.-q)) / (p*(1.0-q) + q*(1.-p)) )
-
 
 # only print snps for which the max fst (across all pop-pairs is <=:
-MAX_FST=0.05
-
-USE_BUCKLETON=True
+MAX_FST=99#0.05 # disabled for his purposes...
 
 minss= 20
 
@@ -52,9 +39,6 @@ for line in sys.stdin:
     if len(s[3]) > 1 or len(s[4]) > 1:
         continue
 
-    if s[6] != 'PASS':
-        continue
-    
     annos = s[7].split(";")
     
     counts = {}
@@ -79,21 +63,18 @@ for line in sys.stdin:
 
     pops = [p for p in counts.keys() if p != "oth" and p != "raw"]
     npops = len(pops)
-
     
     if globalfreq is None:
         continue
-    # convert to the minor allele frequency
-    if globalfreq > 0.5:
-        globalfreq = 1.0 - globalfreq
 
-    
+        
     maxFst=-1
     npairs=0
     sumFst=0.
 
     numSum=0.
     denomSum=0.
+
     
     for i in range(npops):
         pop1 = pops[i]
@@ -138,14 +119,6 @@ for line in sys.stdin:
                 maxFst=Fst
                 
             sumFst += Fst
-            
-            #Fst = fstHudson(freq1, freq2)
-            #if Fst < 0:
-            #    Fst = 0
-            #elif Fst > 1:
-            #    Fst = 1
-                
-            #print(s[0], int(s[1])-1, s[1], s[3], s[4], pop1, pop2, globalfreq, Fst, sep="\t")
 
 
     # report ratio of averages (really sums, but that it is equivalent)
