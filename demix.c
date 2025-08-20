@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
-#include <deque>
+#include <limits>
 #include <set>
 #include <chrono>
 
@@ -34,6 +34,26 @@
 
 #include "demix.h"
 
+typedef struct {
+  double percentile;
+  double chisq;
+} ChisqTable;
+
+// critical values from a chi-square distribution, 1 degree of freedom.
+ChisqTable CHISQ[] = {
+  {0.10, 2.706},
+  {0.05, 5.024},
+  {0.01, 6.635},
+  {0.005, 7.879},
+  {0.001, 10.828}
+};
+
+
+#define NOPE 0
+#define DESCRIBE 1
+#define DETECT 2
+#define DEMIX 4
+
 // sensible defaults (I hope!)
 #define DEFAULT_MIN_MAPQ 20
 
@@ -59,6 +79,9 @@
 // takes three likelihoods; of AA,AB,BB (note NOT phred-scaled)
 // returns the most likely
 #define LIKES_TO_GENO(a,b,c) (a>=b&&a>=c) ? AA : ((c>=b&&c>=a) ? BB : AB)
+
+
+char summaryOutDefault[]="summary";
 
 using namespace std;
 
@@ -91,44 +114,57 @@ die(const char *arg0, const char *extra) {
   }
   
   cerr << "Usage " << endl <<
-    arg0 << " -b bamFile -p panelOfLowFstSnps.bcf (-v vcffileOfSnpsToCall) (-k knownGenotypes.bcf) " << endl <<
-    
+    arg0 << " MODE -b bamFile -v vcfFile.bcf (-k knownGenotypes.bcf) " << endl << endl <<
+        "Possible modes are:" << endl << "DETECT,DESCRIBE,DEMIX" << endl << endl <<
+    "Used to *detect* if a sample is a mixture" << endl <<
+    "*Describe* the mixture proportion, and" << endl <<
+    "*Demix* (deconvolve) the sample (VCF)" << endl << endl <<
     "Options " << endl <<
 
     "\t-h (prints this message) " << endl << endl <<
-    "Reading BAMs..." << endl <<
-    "\t-b bamFile or cramFile (Required; input)" << endl <<
-    "\t\t-T referenceFasta (input; needed for CRAM only)" << endl <<
-    "\t\t-i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites" << endl <<  
-    "\t\t-q base_quality (minimum base quality, applied to reads). Default: " << DEFAULT_MIN_BASEQ << endl <<
-    "\t\t-m mapping_quality (minimum mapping quality). Default: " << DEFAULT_MIN_MAPQ <<  endl <<
-    "\t\t-Q error_quality (Recalibrated error rate is never high than (Phred-scaled value)). Default: " << DEFAULT_MAX_BASEQ << endl <<
-    "\t\t-B (tells this program to trust the quality scores; BQSR is highly recommended) " << endl <<
-    "\t\t-L length (minimum read length). Default: " << DEFAULT_MIN_READLEN << endl <<
-    "\t\t-f read_filter (excludes reads according to SAM read filter flags). Default: 0x" << std::hex << DEFAULT_READ_FILTER << endl <<
-    "\t\t-I read_include_filter (includes reads if all filters are met). Default: 0x" << std::hex << DEFAULT_READ_INCLUDE_FILTER  << endl <<
-    "For either of the filter options (-f/-I) see:" << endl <<
-    "https://broadinstitute.github.io/picard/explain-flags.html" << endl << endl <<
-  
-    "Information for estimating the mixture fraction" << endl <<
-    "\t-p panelFile.bcf (a panel of low-FST markers)" << endl <<
-    "\t\t-w threshold on Wright's FST (discards markers with FST>threshold)" << endl<<
-    "\t\t-W tag in the INFO field providing FST (meanFst is the default)" << endl<<
-    "\t\t-C FSTs are not permitted to be larger than this (1.0 default)" << endl<<
-    "\t\t-a aftag (the tag to use in the VCF file to get the allele frequency. defaults to AF" << endl<<
-    "\t\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
-    "\t\t-F fraction (the mixture fraction; if unspecified, this is estimated)" << endl << endl <<
-
-    "Information on any known contributor" << endl <<
-    "\t-k knownContibutor.bcf (Optional; a BCF file of the known contributor)" << endl<<
-    "\t\t-K knownIndex (from the VCF file, the 1-based index of the known contributor; defaults to 0 (no known contributor))" << endl<< endl <<
+    "Reading/writing files:" << endl <<
     
-    "General IO" << endl <<
-    "\t-v vcfFile (Required for deconvolution; otherwise the mixture proportion is estimated); a VCF file; sites-only, biallelic SNPs only; This file describes which sites to genotype)" << endl <<
-    "\t\t-o outFile (writes deconvolved data in the V/BCF file format; defaults to standard output)" << endl <<
-    "\t\t-t nthreads (number of threads to use. Defaults to 1) " << endl << 
-    "\t\t-D downsampling_rate (A value between [0,1]: the probability of dropping a read; defaults to 0.0, which keeps all reads)" << endl <<
-    "\t\t-s seed (sets the random number seed)" << endl << endl;
+    "\t-b bamFile or cramFile (input; Required, but see -d)" << endl <<
+    "\t-T referenceFasta (input; needed to read CRAM)" << endl <<
+    "\t-v/-V vcfFile (input/output; snps/snvs evaluated in the bam file)" << endl <<
+    "\t-d simulation.bed (input; typically stdin; simulated WGS data; -b and -v can be omitted)" << endl <<
+    "\t-s/-S summary.tsv (input (prefix) /output (filename) [from DESCRIBE]; summary statistics that characterize the mixture" << endl <<
+    "\t-k knownContributor.bcf (input; a known contributor's genotypes)" << endl <<
+    "\t\t-K index (input ; 1-based index of the contributor in -k)" << endl << endl <<
+    "BAM processing:" << endl <<
+    "\t-D r downsampling_rate (A value between [0,1]: while parsing the bam, the probability of dropping a read; defaults to 0.0, which keeps all reads)" << endl <<
+    "\t-C c coverage_downsampling (A value between [0,inf]: after parsing the bam, reads are dropped to give a mean read depth of c; can combine with -D)" << endl <<
+    "\t-e seed (sets the random number sEed)" << endl <<
+    "\t-i (includes basecalls that are adjacent to an indel). Defaults to excluding such sites" << endl <<  
+    "\t-q base_quality (minimum base quality; drops reads). Default: " << DEFAULT_MIN_BASEQ << endl <<
+    "\t-Q base_quality (maximum base quality; values truncated; empirical error is bounded by this). Default: " << DEFAULT_MAX_BASEQ << endl <<
+    "\t-m mapping_quality (minimum mapping quality). Default: " << DEFAULT_MIN_MAPQ <<  endl <<
+    "\t-L length (minimum read length). Default: " << DEFAULT_MIN_READLEN << endl <<
+    "\t-f read_filter (excludes reads according to SAM read filter flags). Default: 0x" << std::hex << DEFAULT_READ_FILTER << endl <<
+    "\t-F read_include_filter (includes reads if all filters are met). Default: 0x" << std::hex << DEFAULT_READ_INCLUDE_FILTER  << endl <<
+    "\t-B (tells this program to trust the quality scores; BQSR is highly recommended) " << endl <<
+    "\t-R (recalibrates base qualities; BQSR of some kind is highly recommended; implies -B) " << endl <<
+    "\t-t nthreads (number of threads to use. *Only used for bam/bcf (de)compression*. Defaults to 1) " << endl << 
+    endl << "VCF/BCF/VCF.gz processing:" << endl <<
+    "\t-W wtag (in the INFO field providing Wright's FST (Default: meanFst)" << endl<<
+    "\t-A aftag (in the INFO field; the alt allele frequency. defaults to AF" << endl<<
+    
+    endl << "All things stats:" << endl <<
+    "\t-w maxFst (discards snps with FST larger than maxFst Default: 1.0)" << endl<<
+    "\t-x xmaxFst (truncates FSTs to be no larger than tmaxFst; Default: 1.0)" << endl <<
+    "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
+    "\t-a chisquare_index (1-5; 1: 0.10, 2: 0.05, 3: 0.01, 4: 0.005, 5: 0.001); draws confidence intervals (CIs) using pre-specified alpha values from a chi square table. Default: 3 (0.01, aka 99% CIs)" << endl <<
+    "\t-p mixture_proportion (the mixture proportion; if unspecified, this is estimated)" << endl << endl <<    
+ 
+    "For either of the filter options (-f/-F) see:" << endl <<
+    "https://broadinstitute.github.io/picard/explain-flags.html" << endl << endl <<
+    "Information for estimating the mixture fraction" << endl << endl;
+
+
+
+
+
+
 
 
   exit(EXIT_FAILURE);
@@ -142,8 +178,8 @@ validNuc(char c) {
 }
 
 bool
-parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
-	int i = 1;
+parseOptions(char **argv, int argc, Options &opt, char mode) {
+	int i = 2;
 	
 	opt.filter=DEFAULT_READ_FILTER;//(BAM_FUNMAP | BAM_FSECONDARY | BAM_FQCFAIL | BAM_FDUP);
 	opt.include_filter=DEFAULT_READ_INCLUDE_FILTER;
@@ -155,26 +191,25 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	opt.outVCF="";
 	opt.knowns=0;
 	opt.knownBcf=NULL;
-
-	opt.lowFstBcf=NULL;
-	
+	opt.chisqIndex=2; // corresponds to alpha=0.01 
+	opt.inBcf=NULL;
+	opt.describeFilename=NULL;
 	opt.downsampleFraction=0; // by default, keep all reads
+	opt.desiredCoverage=-1; // by default, don't downsample.
 	opt.referenceFasta=NULL; // only needed for CRAM support.
 	opt.filterIndelAdjacent=true;
 	opt.help=false;
 	opt.parseVcf=false;
-	opt.trustQualities=false;
-	opt.fstFilt=-1.; // any negative number specifies no FST filter. otherwise, it's the maximum Fst permitted (other markers are dropped)
-	opt.maxFst=1.0; // this CAPs the Fst to be no larger than this (marker is kept)
+	opt.recalibrateQualities = opt.trustQualities=false;
+	opt.maxFstD=1.; 
+	opt.maxFstT=1.0; 
 	
 	opt.ngrid=DEFAULT_NGRID;
 	opt.numThreads=1;
 	opt.mixtureFraction=-1.0;
 	opt.AFtag=DEFAULT_AF_TAG; // #AF
-	loc.allele1 = loc.allele2 = 'A';
 	opt.fstTag = DEFAULT_FST_TAG;
-	loc.region="";
-	
+	opt.summaryFilenameRoot=string(summaryOutDefault);
 	int errors=0;
 	char flag;
 	for ( ; i < argc; ++i) {
@@ -197,6 +232,8 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	    opt.help=true;
 	  } else if (flag == 'B') {
 	    opt.trustQualities=true;
+	  } else if (flag == 'R') {
+	    opt.recalibrateQualities = opt.trustQualities=true;
 	  } else { // option has an argument
 	    ++i;
 	    if (i==argc) {
@@ -216,20 +253,22 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	      opt.knownBcf = argv[i];
 	      if (opt.knowns==0) // assume single-sample bcf unless otherwise specified
 		opt.knowns=1;
-	    } else if (flag == 'p') {
-	      opt.lowFstBcf = argv[i];
+	    } else if (flag == 'v') {
+	      opt.inBcf = argv[i];
 	      opt.parseVcf=true;
 	    } else if (flag == 'L') {
 	      opt.minReadLength = max(atoi(argv[i]), 0);
 	    } else if (flag == 'f') {
 	      opt.filter = atoi(argv[i]);
-	    } else if (flag == 's') {
+	    } else if (flag == 'e') {
 	      int seed = atoi(argv[i]);
 	      srand(seed);
-	    } else if (flag == 'I') {
-	      opt.include_filter = atoi(argv[i]);
 	    } else if (flag == 'F') {
+	      opt.include_filter = atoi(argv[i]);
+	    } else if (flag == 'p') {
 	      opt.mixtureFraction =   max(atof(argv[i]), 0.0000001);
+	    } else if (flag == 's') {
+	      opt.describeFilename = argv[i]; // output
 	    } else if (flag == 'D') {
 	      opt.downsampleFraction= max(atof(argv[i]), 0.);
 	      if (opt.downsampleFraction>1) {
@@ -237,46 +276,45 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 		++errors;
 	      }
 	    } else if (flag == 'C') {
-	      opt.maxFst=max(atof(argv[i]), 0.); // maximum FST permitted when estimating the mixture fraction
+
+	      opt.desiredCoverage=atof(argv[i]);
+	      if (opt.desiredCoverage <= 0.) {
+		cerr << "Coverage (-C) must be positive." << endl;
+		++errors;
+	      }
+	      
+	    } else if (flag == 'x') {
+	      opt.maxFstT=max(atof(argv[i]), 0.); // maximum FST permitted ; truncates
 	    } else if (flag == 'w') {
-	      opt.fstFilt= max(atof(argv[i]), 0.); // maximum FST permitted when estimating the mixture fraction
+	      opt.maxFstD= max(atof(argv[i]), 0.); // maximum FST permitted ; discards markers
 	    } else if (flag == 't') {
 	      opt.numThreads = max(atoi(argv[i]), 1);
 	    } else if (flag == 'T') {
 	      opt.referenceFasta=argv[i];
 	    } else if (flag == 'g') {
 	      opt.ngrid = max(atoi(argv[i]), 2);
-	    } else if (flag == 'r') {
-	      loc.region = string(argv[i]);
-	    } else if (flag == 'o') {
+	    } else if (flag == 'V') {
 	      opt.outVCF = string(argv[i]);
+	    } else if (flag == 'S') {
+	      opt.summaryFilenameRoot = string(argv[i]); // input
 	    } else if (flag == 'b') {
 	      opt.bamFilename = argv[i];
-	    } else if (flag == 'a') {
+	    } else if (flag == 'A') {
 	      opt.AFtag=argv[i];
 	    } else if (flag == 'W') { // and the populations amongst which FST is estimated; -p implies -w
 	      opt.fstTag = std::string(argv[i]);
 	    } else if (flag == 'd') {
-	      opt.bedFilename = argv[i];
-	    } else if (flag == 'c') {
-	      opt.outCounts = argv[i];
-	    } else if (flag == 'v') {
-	      opt.bedFilename = argv[i];
-	    } else if (flag == '1') {
-	      loc.allele1 = argv[i][0];
-	      if (argv[i][1] != 0) {
-		cerr << "Only single-nucleotide regions are allowed" << endl;
+	      opt.bedFilename = argv[i]; // simulation data.
+	    } else if (flag == 'a') {
+	      int chisq = atoi(argv[i]);
+	      if (chisq < 1 || chisq > 5) {
+		cerr << "Specify alpha by indices 1-5; 1: 0.10, 2: 0.05, 3: 0.01, 4: 0.005, 5: 0.001" << endl;
 		++errors;
+	      } else {
+		opt.chisqIndex = static_cast<unsigned char>(chisq-1);
 	      }
-	    } else if (flag == '2') {
-	      loc.allele2 = argv[i][0];
-	      if (argv[i][1] != 0) {
-		cerr << "Only single-nucleotide regions are allowed" << endl;
-		++errors;
-	      }
-	      if (flag == '-') {
+	    } else if (flag == '-') {
 		break; // respect unix-style -- to end the arguments
-	      }
 	    } else {
 	      ++errors;
 	      cerr << "Unexpected flag: " << argv[i-1] << endl;
@@ -292,33 +330,21 @@ parseOptions(char **argv, int argc, Options &opt, Locus &loc) {
 	  }
 	}
 	
-	if (opt.bedFilename==NULL) {
-	  // expert setting; used to diagnose a single SNP
-	  if (loc.region.length()) {
 
-	  // convert to upper-case letters.
-	    if (loc.allele1 > 'Z') {
-	      loc.allele1 -= 32;
-	    }
-	    if (loc.allele2 > 'Z') {
-	      loc.allele2 -= 32;
-	    }
-	  
-	    if (!validNuc(loc.allele1) || !validNuc(loc.allele2) ) {
-	      ++errors;
-	      cerr << "Allelic states may only be A,C,G or T" << endl;
-	    } else if (loc.allele1==loc.allele2) {
-	      ++errors;
-	      cerr << "And alleles may not be the same... " << endl;
-	    }
-	    
-	  } else if (opt.lowFstBcf==NULL) {
-	    ++errors;
-	    cerr << "No bed/vcf file or region was specified and no region was specified... I kinda need one of those!" << endl;		
-	  }
+	if (opt.outVCF != "" && ! (mode & DEMIX) ) {
+	  cerr << "You are asking to write a VCF file (-V), but you are not selecting mode DEMIX)?!" << endl;
+	  ++errors;
+	}
+	
 
+	if (!opt.parseVcf && opt.bamFilename == NULL) {
+	  cerr << "No BAM file provided..." << endl;
+	  ++errors;
 	}
 
+	
+	
+	
 	if (errors)
 	  return false;
 
@@ -372,7 +398,7 @@ csv2vec(const char* str, std::vector<double> *vec) {
 
 
 ostream& operator<<(ostream &os, const BaseCounter &b) {
-  return os << "Ref\t" << b.refQuals.size() << "\tAlt\t" << b.altQuals.size() << "\tOther\t" << b.otherCount << "\tBad\t" << b.badCount;
+  return os << "Ref\t" << b.refQuals.size() << "\tAlt\t" << b.altQuals.size() << "\tOther\t" << b.otherQuals.size() << "\tBad\t" << b.badCount;
 }
 
 
@@ -522,8 +548,7 @@ void
 getSeq(char* buf, const uint8_t *s, int len) {
   int i;
   for (i = 0; i < len; ++i) {
-    buf[i]="=ACMGRSVTWYHKDBN"[bam_seqi(s,
-				       i)];
+    buf[i]="=ACMGRSVTWYHKDBN"[ bam_seqi(s,i) ];
   }
   buf[i] = 0;
 }
@@ -559,7 +584,7 @@ sameChrom(const char *loc1, const char *loc2) {
 
  */
 bool
-matchRegToChrom(const char *reg, const char *chrom) {
+matchRegToChrom(const char *reg, const char *chrom, char charEnd=':') {
   const char *p = chrom;// just a prefix match. chr1 for example
   const char *s = reg;
   while (*p && *s) {
@@ -570,7 +595,7 @@ matchRegToChrom(const char *reg, const char *chrom) {
     ++s;
   }
     
-  if (!*p && *s==':')
+  if (!*p && *s==charEnd)
     return true;
 
   return false;
@@ -587,6 +612,89 @@ comparePiles(const PileupReader &a, const PileupReader &b) {
   
   return a.readname < b.readname;  
 }
+
+
+
+/*
+  Estimates the mean read depth; an estimator of coverage.
+ */
+double
+estimateCoverage(const BaseCounter *counts, unsigned nLoci) {
+  uint64_t ntot=0;
+  unsigned i;
+  if (nLoci < 1) {
+    cerr << "No basecalls detected." << endl;
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  
+  for (i=0; i < nLoci; ++i, ++counts) {
+    ntot += (counts->badCount + counts->otherQuals.size() + counts->refQuals.size() + counts->altQuals.size() );
+  }
+  return static_cast<double>(ntot)/nLoci;
+}
+
+
+/*
+  Naive downsampling of a character vector (r)
+  ds specifies the probability that a read (character) is dropped.
+ */
+void
+downsampleVec(std::vector<unsigned char> &r, double ds) {
+  unsigned i, e;
+  e = r.size();
+  
+  for (i=0; i < r.size(); ++i) {
+    if ( static_cast<double>(rand() )/RAND_MAX < ds) {
+      --e;
+      r[i]=r[e]; // clobber the ith data point
+    }
+  }
+  
+  r.resize( e );
+    
+}
+
+
+/*
+  Naive downsampling of a bunch of basecounter structs (vector)
+  using the downsampling fraction ds (the probability that a read/character is dropped.
+  downsmapling is applied to the ref and alt qualities observed, as well as the bad/other count fields.
+ */
+void
+posthocDownsample(BaseCounter *b, unsigned nLoci,  double ds) {
+  unsigned i, j, nRemove;
+  
+  for (j=0; j < nLoci; ++j, ++b) {
+
+    // downsamples the ref/alt base qualities observed
+    downsampleVec(b->refQuals, ds);
+    downsampleVec(b->altQuals, ds);
+    downsampleVec(b->otherQuals, ds);
+
+    nRemove=0;
+    for (i=0; i < b->badCount; ++i) {
+      if ( static_cast<double>(rand() )/RAND_MAX < ds) 
+	++nRemove;
+    }
+    b->badCount -= nRemove;
+  }
+}
+
+/*
+  Naive base recalibration. Takes in a recalibration fraction
+  (ratio of means)
+  reported prob a base is correct / empirical prob a base is correct
+  rather than recalibrating each base quality,
+  we recalibrate the lookuptable (that converts a base quality into the probability that the basecall is wrong)
+ */
+void
+recalibrateBaseQualities(double re) {
+  double *q = QUAL_2_ERRORPROB;
+  for (int i=0; i <= MAXQUAL; ++i, ++q)
+    *q = 1.- ((1.0- *q) * re);
+  // convert error probability into correct probability, rescale it, then convert it back to an error probability
+}
+
 
 /*
   Converts a "pileup" into the basis of a genotype (qscores associated with ref and alt alleles; these come from Locus).
@@ -607,7 +715,7 @@ processLocus(BaseCounter *count, std::vector<PileupReader> &pile, Locus *loc, ui
   char c;
   unsigned char q;
   
-  count->badCount=count->otherCount=0;
+  count->badCount=0;
     
   // sort vector by index, then read name. paired-end overlaps will be adjacent.
   std::sort(pile.begin(), pile.end(), comparePiles);
@@ -648,13 +756,15 @@ processLocus(BaseCounter *count, std::vector<PileupReader> &pile, Locus *loc, ui
       
       continue;
     }
+    if (q > MAXQUAL)
+      q = MAXQUAL;
     
     if (c == loc->allele1) {
       count->refQuals.push_back( q );
     } else if (c==loc->allele2) {
       count->altQuals.push_back( q );
     } else {
-      ++(count->otherCount);
+      count->otherQuals.push_back( q );
     }
     
     if (i==0)
@@ -683,6 +793,10 @@ summarizeAllRegions(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, s
     return 0;
   }
 
+  for (i=0; i < loci.size(); ++i) {
+    counts[i].badCount = 0;
+  }
+  
   std::vector<std::pair<int32_t, int64_t>> locusCoords;
   locusCoords.reserve( loci.size() );
 
@@ -738,7 +852,7 @@ summarizeAllRegions(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, s
     exit(1);
   }
   
-  cerr << "Bam parsing begin" << endl;
+  // cerr << "Bam parsing begin" << endl;
 
 
   int offset;
@@ -885,18 +999,20 @@ typedef struct {
 	    getNextLocus=true;
 	    goto nextlocus;	
 	  }
+	  unsigned char qbase = qual[offset+readPos];
 	  // base quality is too low...
-	  if (qual[offset+readPos] < opt.minBaseQuality) {
+	  if (qbase < opt.minBaseQuality) {
 	    getNextLocus=true;
 	    goto nextlocus;	
-	  }
+	  } else if (qbase > opt.maxBaseQuality)
+	    qbase = opt.maxBaseQuality;
 
 	  // not a block boundary; let's trust this value.
 	  pile.emplace_back(  PileupReader{
 	      (uint32_t)(currLIndex + lOffset), // which locus
 		std::string( bam_get_qname(b) ), // name of read; need fresh memory alloc
 		"=ACMGRSVTWYHKDBN"[bam_seqi(s,offset+readPos)], // basecall
-		qual[offset+readPos] // quality
+		qbase // quality
 		}
 	    );
 
@@ -921,7 +1037,6 @@ typedef struct {
 
 
   } // next read.
-  // TODO: parse trailing loci.
 
   while(currLIndex  < loci.size()) {  // last locus
 
@@ -952,7 +1067,6 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
   hts_itr_t *iter;    // initiate an iterator
   iter  = sam_itr_querys(idx, header, loc->region.c_str());
   
-  count.otherCount=0;
   count.badCount=0;
 
   coord=unused=-1;
@@ -998,7 +1112,7 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
 	if (skipper[readname]) // I skipped its mate; ergo, I skipped it.
 	  continue;
 	
-      } else if ( ((double)rand())/RAND_MAX < opt.downsampleFraction) {
+      } else if ( static_cast<double>(rand() )/RAND_MAX < opt.downsampleFraction) { // 
 	skipper[readname]=true;
 	continue;
       } else
@@ -1099,7 +1213,9 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
 	  BQ basecall;
 			  
 	  basecall.b = "=ACMGRSVTWYHKDBN"[bam_seqi(s,offset+readPos)];
-	  basecall.q = qual[offset+readPos];
+	  basecall.q =qual[offset+readPos];
+	  if (basecall.q > MAXQUAL)
+	    basecall.q = MAXQUAL;
 	  
 	  // same read twice (the two reads overlap)
 	  // pick the best estimate of the base
@@ -1135,21 +1251,13 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
 // evaluate the pileup (correctly accounting for overlapping reads)
   for (auto iter = readPile.begin(); iter != readPile.end(); ++iter) {
     BQ basecall = iter->second;
-    /* v.01 code, where we just used counts...
-    if (basecall.b==loc->allele1)
-      ++count.refCount;
-    else if (basecall.b==loc->allele2)
-      ++count.altCount;
-    else {
-      ++count.otherCount;
-    }
-    */
+
     if (basecall.b==loc->allele1) {
       count.refQuals.push_back( basecall.q );
     } else if (basecall.b==loc->allele2) {
       count.altQuals.push_back( basecall.q );
     } else {
-      ++count.otherCount;
+      count.otherQuals.push_back( basecall.q );
     }
 
   }
@@ -1311,6 +1419,37 @@ computeLikesWithM(const BaseCounter *b, double *w, double e, double out[N_GENOS]
 }
 
 
+// this is an estimate of the *sequencing* error rate.
+// it accumulates the expected number of errors
+// and divides that by the number of comparisons.
+double
+estimateQualError(const BaseCounter *counts, unsigned nLoci) {
+  long double expectedErrors=0.;
+  unsigned long ntot=0;
+  for (unsigned i = 0; i < nLoci; ++i, ++counts) {
+    for (auto it = (*counts).refQuals.begin(); it != (*counts).refQuals.end(); ++it) 
+      expectedErrors += QUAL_2_ERRORPROB[ *it ];
+
+    for (auto it = (*counts).altQuals.begin(); it != (*counts).altQuals.end(); ++it) 
+      expectedErrors += QUAL_2_ERRORPROB[ *it ];
+
+    for (auto it = (*counts).otherQuals.begin(); it != (*counts).otherQuals.end(); ++it) 
+      expectedErrors += QUAL_2_ERRORPROB[ *it ];
+    
+    ntot += counts->refQuals.size() + counts->altQuals.size() + counts->otherQuals.size();
+    
+  }
+  if (ntot < 1)
+    return -1.;
+  
+  return expectedErrors/ntot;
+  
+}
+
+
+// inspired by Maruki and Lynch 10.1534/g3.117.039008
+// this provides a naive estimate of *sequence* error assuming a biallelic genotyping model.
+// described in Crysup and Woerner 10.1534/g3.117.039008 
 double
 estimateError(const BaseCounter *counts, unsigned nLoci, double altMinError) {
 
@@ -1320,10 +1459,15 @@ estimateError(const BaseCounter *counts, unsigned nLoci, double altMinError) {
   nRight=nWrong=0;  
   for (i=0; i < nLoci; ++i, ++counts) {
     nRight += counts->refQuals.size() + counts->altQuals.size();
-    nWrong += counts->otherCount;
+    nWrong += counts->otherQuals.size();
   }
 
-  e = ((double)nWrong)/(nWrong+nRight);
+  if (nRight + nWrong==0) {
+    return -1;
+  }
+
+  
+  e = static_cast<double>(nWrong)/(nWrong+nRight);
 
   
   // we can only observe 2/3 possible error states
@@ -1356,7 +1500,7 @@ estimateError(const BaseCounter *counts, unsigned nLoci, double altMinError) {
 
 // TODO: outline the likelihood estimate; keep genotypes in memory;
 double
-estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Options *opt, double error) {
+estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Options *opt, double error, std::vector<MFest> &est, unsigned *nsnps) {
 
   int nLoci = (int) loci->size();
   int i,j,gridSize = opt->ngrid;
@@ -1379,15 +1523,17 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
   int BBindexes[N_GENOS];
   int *idx;
   int nIndexes=0;
-  int nIncluded=0;
+  unsigned nIncluded=0;
   bool haveKnowns = opt->knowns>0;
 
+  
     // if the mixture fraction is specified, the the variable mf is defined
   // and the size of the grid is set to 1.
   if (opt->mixtureFraction>=0.0) {
     gridSize=0; // note that we search gridSize+1, so this ensures loops happen once.
     gridSizeD=1.;
   }
+  cerr << "estimate MF?\n";
   
   if (haveKnowns) {
     // nIndexes==3 in all cases.
@@ -1398,7 +1544,6 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
   } else { // both unknowns, then the mixture fraction only meaningfully varies from 0-0.5 (or from 0.5-1, take you pick!)
     gridSizeD += gridSizeD;
   }
-
   
   for (i = 0; i <= gridSize; ++i) {
     loglike=0.;
@@ -1461,14 +1606,16 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
       bestMF=mf;
     }
     //cout << mf << "\t" << loglike << endl;
-    printf("mf\t%0.4f\t%0.9f\n", mf, loglike);
+    // printf("mf\t%0.4f\t%0.9f\n", mf, loglike);
+    est[i].mf=mf;
+    est[i].loglike=loglike;
     if (opt->mixtureFraction>= 0.0)  // happens once; breaks at end of loop
       break;
   }
 
   
-  printf("nsnps\t%f\t%d\n", error, nIncluded);
-
+  //printf("nsnps\t%f\t%u\n", error, nIncluded);
+  *nsnps=nIncluded;
   return bestMF;
 }
 
@@ -1678,7 +1825,6 @@ void
 writeVcfOneChrom(double mf, double error, vector<Locus> *loci, Options &opt, const std::string &chrom, VcfWriter *writer) {
 
 
-
   unsigned len, i;
 
   // first time through, the writer struct is initialized
@@ -1706,7 +1852,7 @@ writeVcfOneChrom(double mf, double error, vector<Locus> *loci, Options &opt, con
     bcf_hdr_append(writer->hdr, string("##empiricalerror=" + std::to_string(error)).c_str());
     // log key items from how this file was made
     bcf_hdr_append(writer->hdr, string("##bamFile=" + std::string(opt.bamFilename)).c_str() );
-    bcf_hdr_append(writer->hdr, string("##fstFilt=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.fstFilt)).c_str() );
+    bcf_hdr_append(writer->hdr, string("##maxFstT=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.maxFstT)).c_str() );
 
   // and clearly state hypotheses (along w/ reminders as to what was used)
     if (opt.knowns) {
@@ -1754,7 +1900,6 @@ writeVcfOneChrom(double mf, double error, vector<Locus> *loci, Options &opt, con
       cerr << "Failed to write header to file: " << opt.outVCF << endl;
       exit(1);
     }
-
   }
 
   bcf1_t *rec = bcf_init1();
@@ -1826,7 +1971,8 @@ writeVcfOneChrom(double mf, double error, vector<Locus> *loci, Options &opt, con
     bcf_clear1(rec);
     counts.refQuals.clear();
     counts.altQuals.clear();
-    counts.otherCount=counts.badCount=0;
+    counts.otherQuals.clear();
+    counts.badCount=0;
 
     
     rec->rid = chromIndex;
@@ -1981,8 +2127,8 @@ writeVcfOneChrom(double mf, double error, vector<Locus> *loci, Options &opt, con
     ad[1] = counts.altQuals.size();
     ad[2]=bcf_int32_vector_end;
     bcf_update_info_int32(writer->hdr, rec, "AD", ad, 2);
-    if (counts.otherCount) {
-      int32_t dp = counts.otherCount;
+    if (counts.otherQuals.size()) {
+      int32_t dp = counts.otherQuals.size();
       bcf_update_info_int32(writer->hdr, rec, "OTH", &dp, 1);
     }
     
@@ -2067,10 +2213,6 @@ writeOneChrom(Options &opt, unsigned chromosome, double mf_hat, double error, Vc
   
   writeVcfOneChrom(mf_hat, error, &loci, opt, chr, writer);
   
-  auto t4 = std::chrono::system_clock::now();
-  elapsed_seconds = t4-t2;
-  cerr << chr << " genotype : elapsed seconds " << elapsed_seconds.count() << endl;
-  
 }
 
 
@@ -2103,7 +2245,7 @@ writeVcf(double mf, double error, vector<Locus> *loci, Options &opt) {
   bcf_hdr_append(hdr, string("##empiricalerror=" + std::to_string(error)).c_str());
   // log key items from how this file was made
   bcf_hdr_append(hdr, string("##bamFile=" + std::string(opt.bamFilename)).c_str() );
-  bcf_hdr_append(hdr, string("##fstFilt=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.fstFilt)).c_str() );
+  bcf_hdr_append(hdr, string("##fstFilt=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.maxFstT)).c_str() );
 
   // and clearly state hypotheses (along w/ reminders as to what was used)
   if (opt.knowns) {
@@ -2242,7 +2384,8 @@ writeVcf(double mf, double error, vector<Locus> *loci, Options &opt) {
     bcf_clear1(rec);
     counts.refQuals.clear();
     counts.altQuals.clear();
-    counts.otherCount=counts.badCount=0;
+    counts.otherQuals.clear();
+    counts.badCount=0;
     
     // todo; consider merging headers...
     string ch( bcf_hdr_id2name(wgsPanel.hdr, wgsPanel.rec->rid));    
@@ -2421,8 +2564,8 @@ writeVcf(double mf, double error, vector<Locus> *loci, Options &opt) {
     ad[1] = counts.altQuals.size();
     ad[2]=bcf_int32_vector_end;
     bcf_update_info_int32(hdr, rec, "AD", ad, 2);
-    if (counts.otherCount) {
-      int32_t dp = counts.otherCount;
+    if (counts.otherQuals.size()) {
+      int32_t dp = counts.otherQuals.size();
       bcf_update_info_int32(hdr, rec, "OTH", &dp, 1);
     }
     
@@ -2670,63 +2813,364 @@ addKnowns(std::vector<Locus> &loci, const char* knownBcf, int knownIndex) {
   return nrec;
 }
 
+// poor mans string compare, case insensitive.
+// c can be upper or lower case, or a mix.
+// c can also be a csv (, are treated as nuls;)
+// b must be upper case.
+// return value is the c iterated to the next word (or nul)
+
+const char*
+naiveStringCompare(const char *b, const char *c, bool *match) {
+  *match=false;
+  
+  while (*c && *b) {
+    if (! (*c==*b || *c-32==*b) )
+      return c;
+    ++c;
+    ++b;
+  }
+
+
+  if ( (!*c || *c==',') && !*b) {
+
+    *match=true;
+    if (*c==',') {
+      return c+1;
+    }
+  }
+  return c;
+}
+
+char
+parseMode(const char *arg1) {
+
+  char mode=NOPE;
+  
+  if (arg1==NULL || *arg1==0)
+    return NOPE;
+
+
+  const char *c;  
+  while (true) {
+    bool match;
+
+    
+    c = naiveStringCompare("DESCRIBE", arg1, &match);
+
+    if (match) {
+
+      mode |= DESCRIBE;
+      if (*c) {
+	arg1=c;
+	continue;
+      } else
+	break;
+
+    }
+
+    c = naiveStringCompare("DETECT", arg1, &match);
+    if (match) {
+      
+      mode |= DETECT;
+      if (*c) {
+	arg1=c;
+	continue;
+      } else
+	break;
+
+    }
+    
+    c = naiveStringCompare("DEMIX", arg1, &match);
+    if (match) {
+      mode |= DEMIX;
+
+      if (*c) {
+	arg1=c;
+	continue;
+      } else
+	break;
+      
+    }
+    
+    break;
+
+  }
+
+  
+  return mode;
+  
+}
+
+/*
+  reads the text report (writeTextReport) created by DESCRIBE
+  and extracts the mixture fraction
+ */
+bool
+readDescribe(const char *filename, Options &opt) {
+
+  ifstream bedFile;
+  string line;
+  const char *c;
+  
+
+  double curMf, curLike, bestMf, nulLike, bestLike=-std::numeric_limits<double>::max();
+  opt.mixtureFraction=bestMf=curMf=-1;
+  nulLike = -std::numeric_limits<double>::max();
+  
+  bedFile.open(filename);
+  if (bedFile.fail()) 
+    return false;
+
+  
+  while (getline(bedFile, line)) {
+
+    // format is:
+    //mf\t0.10\t-8003.0
+    c=line.c_str();
+    if (! *c)
+      break;
+    else if (*c != 'm' ||c[1] != 'f')
+      break;
+
+    while (*c && *c != '\t')
+      ++c;
+
+    if (! *c) {
+      cerr << "Parsing failure with: " << filename << endl;
+      break;
+    }
+
+    ++c; // scroll past \t
+    curMf = atof(c);
+
+    while (*c && *c != '\t')
+      ++c;
+
+    if (! *c) {
+      cerr << "Parsing failure with: " << filename << endl;
+      break;
+    }
+    
+    ++c; // scroll past \t
+    curLike = atof(c);
+
+    if (bestMf==-1) { // true on the first loop thru
+      bestMf=curMf;
+      bestLike = nulLike = curLike;
+    } else if (bestLike < curLike) {
+      bestMf=curMf;
+      bestLike = curLike;
+    }    
+  }
+  bedFile.close();
+
+  if (bestMf==-1) {
+    cerr << "Parsing failure; empty file? " << filename <<endl;
+    return false;
+  } else if (nulLike >= bestLike) {
+    cerr << "Not a mixture; use a single-source genotyping method " << filename << endl;
+    return false;
+  }
+  
+  double delta = 2*(bestLike - nulLike);
+  if (delta <= CHISQ[ opt.chisqIndex ].chisq) {
+    cerr << "A mixture proportion of 0 is in your confidence interval. This may not be a mixture: " << filename << endl;
+  }
+  
+  opt.mixtureFraction=bestMf;
+  return true;
+}
+
+void
+writeTextReport(std::vector<MFest> &mfs, char mode, SampleStats &ss, Options &opt) {
+
+  char buffer[1023];
+  std::ostream* outfile = &std::cout;
+  
+  if (mode&DESCRIBE) {
+    string outfileName = opt.summaryFilenameRoot + ".mf";
+    if (opt.summaryFilenameRoot != "-" && opt.summaryFilenameRoot != "/dev/stdout") {
+
+      outfile = new std::ofstream(outfileName);
+    
+      if (! ((std::ofstream*)outfile)->is_open()) {
+	cerr << "Failed to open " << outfileName << " for writing" << endl;
+	exit(1);
+      }
+    }
+    
+    for (std::vector<MFest>::iterator it = mfs.begin(); it != mfs.end(); ++it) {
+      sprintf(buffer, "mf\t%0.4f\t%0.9f\n", it->mf, it->loglike); // cout's way of handling precision sucks.
+      *outfile << buffer;
+    }
+    sprintf(buffer, "nsnps\t%f\t%d\n", ss.sequenceError, ss.nsnps);
+    *outfile << buffer;
+
+    if (outfile != &std::cout) {
+      ((std::ofstream*)(outfile))->close();
+      delete outfile;
+    }
+    
+    
+  }
+  
+  if (mode&DETECT) {
+
+    string xtra="";
+    if (mode&DESCRIBE)
+      xtra="-\t"; // makes a true tsv if both modes are selected (ie, 3 columns, while the below is naturally 2 columns)
+    const char *x = xtra.c_str();
+    
+    
+    string outfileName = opt.summaryFilenameRoot + ".detect";
+    if (opt.summaryFilenameRoot != "-" && opt.summaryFilenameRoot != "/dev/stdout") {
+      outfile = new std::ofstream(outfileName);
+    
+      if (! ((std::ofstream*)outfile)->is_open()) {
+	cerr << "Failed to open " << outfileName << " for writing" << endl;
+	exit(1);
+      }
+    }
+    
+    sprintf(buffer, "coverage\t%s%0.4f\nnsnps\t%s%u\n", x, ss.coverage, x, ss.nsnps);
+    *outfile << buffer;
+    sprintf(buffer, "empirical_sequence_error\t%s%0.4f\nreported_sequencing_error\t%s%0.4f\n", x, ss.sequenceError, x, ss.sequencingError);
+    *outfile << buffer;
+    
+    if (opt.recalibrateQualities) {
+      sprintf(buffer, "initial_sequencing_error\t%s%0.4f\n", x, ss.sequencingErrorInitial);
+      *outfile << buffer;
+    }
+    
+    unsigned i, j, bestIndex=0;
+    double bestAltLike, delta, bestLike=mfs[0].loglike;
+
+    if (mfs.size() > 1) {
+      bestAltLike=mfs[1].loglike;
+    } else {
+      bestAltLike=bestLike;
+    }
+    
+    for ( i=1; i < mfs.size(); ++i) {
+      if (mfs[i].loglike > bestLike) {
+	bestLike = mfs[i].loglike;
+	bestIndex=i;
+      }
+      if (mfs[i].loglike > bestAltLike) {
+	bestAltLike=mfs[i].loglike;
+      }
+    }
+
+    // for some context, see: https://en.wikipedia.org/wiki/Wilks%27_theorem
+    // tl;dr, a chi square table (in some contexts) can be use to draw a confidence region around a point estimate.
+
+    sprintf(buffer, "mp_pointestimate\t%s%0.4f\n", x, mfs[bestIndex].mf);
+    *outfile << buffer;
+
+    // log likelihood ratio
+    if (mfs.size()>1) {
+      double ln10=-10./PHRED_SCALAR; // equivalent to ln(10)
+      sprintf(buffer, "log_10_lr\t%s%0.4f\n",  x, (bestAltLike/ln10) - (mfs[0].loglike/ln10) ); // for the forensic audience, provide the log10lr of the alt (2-person) vs null (1person) hypotheses
+    }
+    *outfile << buffer;
+    
+    i=opt.chisqIndex;
+      
+    // least lower bound.
+    for (j=0; j < mfs.size(); ++j) {
+      delta = 2*(bestLike - mfs[j].loglike);
+      if (delta <= CHISQ[i].chisq) {
+	break;
+      }
+    }
+      // greatest upper bound
+    sprintf(buffer, "mp_lowerbound_%0.3f\t%s%0.4f\n", CHISQ[i].percentile, x, mfs[j].mf);
+    *outfile << buffer;
+    
+    for (j=mfs.size(); j >0; --j) {
+      delta = 2*(bestLike - mfs[j-1].loglike);	
+      if (delta <= CHISQ[i].chisq) {
+	--j;
+	break;
+      }
+    }
+    sprintf(buffer, "mp_upperbound_%0.3f\t%s%0.4f\n", 1.0-CHISQ[i].percentile, x, mfs[j].mf);
+    *outfile << buffer;
+
+    if (outfile != &std::cout) {
+      ((std::ofstream*)(outfile))->close();
+      delete outfile;
+    }
+  }
+
+
+  if (opt.recalibrateQualities) 
+    return;
+  
+  // eg, reported base quality is 20 (average) (1% error rate), but the empirical rate is higher
+  //
+  if (ss.sequenceError > ss.sequencingError) {
+      
+    // ad hoc separation; error rate is off by more than a factor of 2
+    if (ss.sequenceError > ss.sequencingError +  ss.sequencingError) {
+      if (opt.trustQualities) {
+	
+	cerr << "Base quality warning-- the reported base qualities are systematically too large (empirical vs reported error): "
+	     << ss.sequenceError << " " << ss.sequencingError  << endl;
+	cerr << "Your sample may falsely present as a mixture" << endl;
+      } else 
+	  cerr << "Base quality warning-- the reported base qualities are very over-optimistic " << endl;
+	
+    
+      cerr << "Strongly consider recalibrating base qualities... " << endl;
+      
+    } else { // bqs are off, but less than a factor of 2.
+      if (opt.trustQualities) {
+	cerr << "Base quality warning-- the reported base qualities appear somewhat elevated: (empirical vs reported error): "
+	     << ss.sequenceError << " " << ss.sequencingError  << endl;
+      } else {
+	cerr << "Base quality warning-- the reported base qualities are over-optimistic; not trusting base qualities won't fix everything" << endl;
+      }
+    }
+  }
+  
+  
+}
 
 int
 main(int argc, char **argv) {
 
-
   Options opt;
-  Locus loc;
-  if (! parseOptions(argv, argc, opt, loc)) {
+  char mode = parseMode(argv[1]);
+  if (!mode) {
+    die(argv[0], "Invalid mode detected");
+  }
+  
+  if (! parseOptions(argv, argc, opt, mode)) {
     die(argv[0], NULL);
   }
   
-  if (opt.trustQualities) 
-    initQual2Prob();
+  
+  initQual2Prob();
   
   bcf_hdr_t *header=NULL;
+  vector<Locus> loci;
+  BaseCounter *results=NULL;
   
-  // used for testing purposes almost exclusively; just prints the base-count stats of 1 locus.
-  if (loc.region.length()) {
-    BaseCounter result;
-    // borrowed from: https://dearxxj.github.io/post/5/
-    // non-threaed version; open the bam file in main
-    bam1_t *b = bam_init1();
-    samFile *in = sam_open(opt.bamFilename, "r");
-    if (in == NULL)
-      return -1;
+  if (mode) { // should be if true.
 
-    initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
-    
-    sam_hdr_t *header = sam_hdr_read(in);
-    if (header == NULL)
-      return -1;
-    
-    hts_idx_t *idx;  // initiate a BAM index
-    idx = sam_index_load(in, opt.bamFilename);   // second parameter is same as BAM file path
-    if (idx == NULL) {
-      cerr << "Failed to load index" << endl;
-      return -1;
-    }
-    if (! summarizeRegion(in, b, header, idx, &loc, result, opt)) {
-      cerr << "Skipping region " << loc.region << endl;
-      return -1;
-    }
-    cout << result << endl;
-    bam_destroy1(b);
-    bam_hdr_destroy(header);
-    sam_close(in);
-    hts_idx_destroy(idx);
-    exit(EXIT_SUCCESS);
-    
-  } else {
-    vector<Locus> loci;
-    BaseCounter *results=NULL;
     vector<BaseCounter> tmpResults;
     
     if (opt.parseVcf) {
-      if (NULL == (header= (bcf_hdr_t*)readLowFstPanel(opt.lowFstBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str(), opt.maxFst)) ) {
-	die(argv[0], "Failed to parse the vcf file ... ");
+
+      if (mode == DEMIX) {// note the == Fst tags are not necessary when we are deconvolving the mixture...
+	if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, NULL, opt.maxFstD, opt.maxFstT)) ) {
+	  die(argv[0], "Failed to parse the vcf file ... ");
+	}
+      } else {
+	if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str(), opt.maxFstD, opt.maxFstT)) ) {
+	  die(argv[0], "Failed to parse the vcf file ... ");
+	}
       }
       results = new BaseCounter[ loci.size() ];
 
@@ -2756,15 +3200,14 @@ main(int argc, char **argv) {
 	if (loci[0].genotypecall != NOCALL)
 	  opt.knowns=1; // treated as a flag, and an index to grab out of the vcf file
 	// if we're here, there's no VCF file to parse...
-	
       }
       
     }
 
-    if (opt.numThreads==1) {
-      
-      // borrowed from: https://dearxxj.github.io/post/5/
-      // non-threaed version; open the bam file in main
+    
+    // borrowed from: https://dearxxj.github.io/post/5/
+    // non-threaed version; open the bam file in main
+    if (opt.numThreads>0) { // todo, multithreaded io? (as else)
       bam1_t *b = bam_init1();
       samFile *in = sam_open(opt.bamFilename, "r");
       if (in == NULL)
@@ -2782,108 +3225,108 @@ main(int argc, char **argv) {
 	cerr << "Failed to load index" << endl;
 	return -1;
       }
-      cerr << " begin summarize\n";
+
 
       // this does a single seek.
+      summarizeAllRegions(in, b, header, idx, loci, results, opt);
 
-      if (opt.mixtureFraction < 0.)
-	summarizeAllRegions(in, b, header, idx, loci, results, opt);
-
-
-      /*
-      // this works too, but is horribly slow. Uses a seek in the bam for each snp
-      if (opt.mixtureFraction < 0.) {
-	int i=0;
-	for (std::vector<Locus>::iterator it = loci.begin(); it != loci.end(); ++it, ++i) {
-
-	  if (! summarizeRegion(in, b, header, idx, &(*it), results[i], opt)) {
-	    cerr << "Skipping region " << loc.region << endl; // when this happen results[i].bad == UINT_MAX
-	  }
-	  //	  if (i % 100000 ==0)
-	  //cerr << ".";
-	}
-      }
-      */
-
-      
-      cerr << " end summarize\n";
       bam_destroy1(b);
       bam_hdr_destroy(header);
       sam_close(in);
       hts_idx_destroy(idx);
       
-    } else if (opt.numThreads>1) {
-      // multithreaded version; each
-      // thread has its own file handle
-      // (bam IO has state)
-      
-      // helps later on; make sure the number of threads <= the number of loci
-      // this is a definite corner case, btw. numthreads should be << numloci
-      opt.numThreads = min(opt.numThreads, (int)loci.size());
-      SummarizeRegionHelper  *helpers = new SummarizeRegionHelper[ opt.numThreads ];
-
-      // poorly supported C11 threads here
-#ifdef C11THREADS
-
-      thrd_t *threads = new thrd_t[ opt.numThreads ];
-      for (int i = 0; i < opt.numThreads; ++i) {
-	helpers[i] = {&loci, results, opt, i};
-	thrd_create(&threads[i], threadSummarizeRegion, &helpers[i]);
-      }
-
-      
-      for (int i = 0; i < opt.numThreads; ++i) {
-	thrd_join(threads[i], NULL);
-      }
-      
-      delete[] threads;
-
-      // C++11 threads here
-#else
-      std::vector<std::thread> thrds;
-      for (int i = 0; i < opt.numThreads; ++i) {
-	helpers[i] = {&loci, results, opt, i};
-	thrds.push_back(
-			std::thread(&threadSummarizeRegion, (void*)&helpers[i])
-			);
-      }
-
-      for (auto& th : thrds) {
-        th.join();
-      }
-	  
-#endif
-      delete[] helpers;
-    } // IO is complete; either single thread or multithreaded
-
-    double error = pow(10, opt.maxBaseQuality/-10.0);
-
-    double mf_hat = opt.mixtureFraction;
-    if (opt.mixtureFraction < 0.) {
-      mf_hat = estimateMF_1Thread(results, &loci, &opt, error);
-      error = estimateError(results, loci.size(), error);
-      //  false only iff simulation. in which case, we don't write to file.
-      // todo; generalize
-      if (!opt.parseVcf)
-	exit(0);
     }
 
-    // bedfilename is overloaded to also be the name of the SNP panel filename.
-    // when null, we aren't deconvovling anything
-    if ( opt.bedFilename==NULL)
-      exit(0);
     
-    /* very memory efficient, but wayyyy to slow. let's try this again.
-    if (opt.outVCF != ""){
-      writeVcf(mf_hat, error, &loci, opt);
-    }
-    */
+    SampleStats ss;
+    ss.sequenceError = pow(10, opt.maxBaseQuality/-10.0);  // set to the min error (0.001)
+    ss.nsnps=0;
 
+
+    // bool readDescribe(const char *filename, Options &opt)
+    if (opt.describeFilename!= NULL) {
+      // pulls the mixture fraction from file.
+      // sets opt.mixtureFraction accodingly
+      if (! readDescribe(opt.describeFilename, opt) ) {
+	cerr << "Parsing problem with: " << opt.describeFilename << endl <<
+	  "Exiting..." << endl;
+	return 1;
+      }
+      cout << opt.mixtureFraction << endl;
+      exit(1);
+    }
+    
+    double mf_hat = opt.mixtureFraction;
+
+    std::vector<MFest> mfs;
+    if (opt.mixtureFraction >= 0.0) // we say what the MF is. just one likelihood to assess.
+      mfs.resize(1);
+    else
+      mfs.resize(opt.ngrid+1);
+
+    // empirical error estiamte; truncated to be no larger than Q30 (default)
+    ss.sequenceError = estimateError(results, loci.size(), ss.sequenceError);
+    if (ss.sequenceError < 0) {
+      cerr << "No usable data found" << endl;
+      die(argv[0], NULL);
+    }
+    
+    ss.sequencingErrorInitial=ss.sequencingError=estimateQualError(results, loci.size());
+    
+    // todo posthoc downsample, optionally.
+    ss.coverage=estimateCoverage(results, loci.size());
+
+        // todo add recalibration to the options.
+    // also record previous quality
+    if (opt.recalibrateQualities) {
+
+      if (ss.sequenceError > ss.sequencingError) 
+	recalibrateBaseQualities( (1.0- ss.sequenceError) / (1.0-ss.sequencingError) );
+
+      ss.sequencingError=estimateQualError(results, loci.size());
+
+    }
+    
+    if (opt.desiredCoverage > 0) {
+      // cerr << "HERE " << ss.coverage <<  " " << 1.- opt.desiredCoverage / ss.coverage <<  endl;
+      
+      if (opt.desiredCoverage < ss.coverage) {
+	posthocDownsample(results, loci.size(), 1. - opt.desiredCoverage / ss.coverage);
+	// note we re-estimated coverage as the above is probabilistic.
+	ss.coverage=estimateCoverage(results, loci.size());
+	cerr << " new coverage " << ss.coverage << endl;
+	
+	// if the specified coverage is more than what's available...
+      } else if (opt.desiredCoverage > ss.coverage + std::numeric_limits<double>::epsilon() ) {
+	cerr << "Requested coverage ("<< opt.desiredCoverage <<
+	  ") Exceeds the mean read depth (" << ss.coverage << ")" << endl <<
+	  "No (further) downsampling will be performed" << endl;
+	
+      }
+      
+      
+    }
+
+    mf_hat = estimateMF_1Thread(results, &loci, &opt, ss.sequenceError, mfs, &ss.nsnps);
+
+    if (mode&DETECT || mode&DESCRIBE) {
+      writeTextReport(mfs, mode, ss, opt);
+    }
+
+    if (! (mode&DEMIX) )
+      exit(0);
+
+    
+      
     VcfWriter writer;
     writer.fp=NULL;
     writer.hdr=NULL;
+    writer.results=results; // these are incremented when writing (todo)
+    writer.loci = &loci;
+    
     for (unsigned i =1 ; i < 23; ++i) {
-      writeOneChrom(opt, i, mf_hat, error, &writer);
+      // todo; call writeVcfOneChrom instead; control results/loci accordingly. Note that writer has both.
+      writeOneChrom(opt, i, mf_hat, ss.sequenceError, &writer);
     }
     
     closeVcfWriter(writer, opt);
@@ -3078,7 +3521,7 @@ vcfGetGenotype(VcfIterator &vcf, Locus &loc, int knownIndex) {
 // input files may either be of type bed (uncompressed) or
 // something that hts_open can read (bcf/vcf/vcf.gz would make sense)
 void *
-readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, float maxFst) {
+readPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, double maxFstD, double maxFstT) {
 
   htsFile *fp    = hts_open(fname,"r");
   if (fp==NULL) {
@@ -3103,8 +3546,7 @@ readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, co
     bcf_unpack(rec, BCF_UN_INFO);
 
     if (bcf_is_snp(rec) && rec->n_allele == 2) {
-      Locus loc;
-      
+      Locus loc;      
       // returns >= on success..
       if (bcf_get_info_float(hdr, rec, AFtag, &af, &naf) < 0) {
 	continue;
@@ -3112,11 +3554,19 @@ readLowFstPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, co
 	loc.af= af[0];
       }
 
-      // and now grab the Fst tag (should it exist)
-      if (bcf_get_info_float(hdr, rec, fstTag, &af, &naf) < 0) {
+
+      if (fstTag==NULL || maxFstT <= 0.) {
+	loc.Fst=0.;
+	// and now grab the Fst tag (should it exist)
+      } else if (bcf_get_info_float(hdr, rec, fstTag, &af, &naf) < 0) {
 	continue;
       } else {
-	loc.Fst= min(af[0], maxFst);
+	loc.Fst= af[0];
+	if (loc.Fst >  maxFstD)
+	  continue;
+	else if (loc.Fst > maxFstT)
+	  loc.Fst=maxFstT;
+
       }
       
       // convert the internal (int-based) chromosome representation into its string equivalent
@@ -3258,8 +3708,13 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc, const Opti
       foo.altQuals.reserve(altCount);
       for (i=0; i < altCount; ++i)
 	foo.altQuals.push_back( opt.maxBaseQuality);
+
       
-      foo.otherCount=atoi(records[7].c_str());
+      unsigned otherCount=atoi(records[7].c_str());
+      foo.otherQuals.reserve(otherCount);
+      for (i=0; i < otherCount; ++i)
+	foo.otherQuals.push_back( opt.maxBaseQuality);
+      
       foo.badCount=0;
       bc.push_back(foo);
     } 
@@ -3281,12 +3736,14 @@ readBed(char *filename, vector<Locus> &loci, vector<BaseCounter> &bc, const Opti
       }
 
       // default Fst is 0; equivalent to no theta correction
-      if (opt.fstFilt >= 0.0 && afs.size() > 1) {
+      if (afs.size() > 1) {
 
 	loc.Fst = afs[1];
-	if (loc.Fst > opt.fstFilt) {
+	if (loc.Fst > opt.maxFstD) 
 	  bc.back().badCount=IGNORE_SNP;
-	}
+	else if (loc.Fst > opt.maxFstT)
+	  loc.Fst = opt.maxFstT;
+	
       }
 
     }
@@ -3373,7 +3830,7 @@ writeCounts(const char *outfile, vector<Locus> *loci, BaseCounter *counts, doubl
       fh << it->region << "\t" << it->allele1 << "\t" << it->allele2 << "\t" << mf << "\t" << error <<
 	"\t"  << counts->refQuals.size() <<
 	"\t" << counts->altQuals.size() <<
-	"\t" << counts->otherCount <<
+	"\t" << counts->otherQuals.size() <<
 	"\t" << counts->badCount;
 
       // note: -1 forces us to just compute the likelihood... (and not the posterior)

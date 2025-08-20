@@ -8,6 +8,15 @@
 #include <cstdlib>
 
 typedef struct {
+  double coverage; // mean read depth at sites selected
+  double sequencingError; // error estimate, based on base qualities; possibly recalibrated
+  double sequencingErrorInitial; // prior to recalibration, what was the mean sequencing error rate
+  double sequenceError; // error estimate; naive, based on observed sequences
+  unsigned nsnps; // how many snps do we have data for?
+} SampleStats;
+
+
+typedef struct {
   std::string region;
   uint32_t pos;
   float af; // population allele frequency; defaults to DEFAULT_AF
@@ -17,13 +26,27 @@ typedef struct {
   char genotypecall; // kludge. used to house known genotypes. 
 } Locus;
 
-
 typedef struct {
   uint32_t locIndex;
   std::string readname;
   char basecall;
   unsigned char quality;
 } PileupReader;
+
+// key parameter of mixtures, the proposed mixture fraction (mf)
+// and it's corresponding likelihood (log base e of).
+typedef struct {
+  double mf;
+  double loglike;
+} MFest;
+
+typedef struct {
+  std::vector<unsigned char> refQuals; // not really reference; alleles of type 1 or 2. count the number of bases of sufficient quality
+  std::vector<unsigned char> altQuals; // ditto for the other (alt) allele
+  std::vector<unsigned char> otherQuals; // ditto, for nucleotides thare are (under a biallelic model) necessarily wrong
+  unsigned badCount;  // the number of reads at the site that fail the QC filters
+} BaseCounter;
+
 
 // the bits and pieces needed to 
 // parse a VCF file
@@ -35,12 +58,13 @@ typedef struct {
   const char *fname;
 } VcfIterator;
 
-
 typedef struct {
   std::string filename; // the name of the file being written
   std::string file_format; // w (vcf) or wb (bcf/vcf.gz)
   htsFile *fp;
   bcf_hdr_t *hdr;
+  BaseCounter *results;
+  std::vector<Locus> *loci;  
 } VcfWriter;
 
 #define NOCALL 0
@@ -58,30 +82,15 @@ typedef struct {
 // New in this version:
 // Fst corrected genotype probability estiamtion
 // and the expanded likeilhood function (moving from formula 5 to formula 3 of Crysup & Woerner)
-#define VERSION "0.02"
+#define VERSION "0.14"
 
-// FST ala Hudson using the formulation of:
-// http://www.genome.org/cgi/doi/10.1101/gr.154831.113.
-// (see the SOM)
-// #define FST_HUDSON(p,q) (  ( (p-q)*(p-q) )/( (p*(1.-q) + (q*(1.-p))) )  )
-
-
-// the above (commented out) macro is right (numerically) for the N/D estimator of Fst, but it's
-// there is a typo in the SOM (D is defined incorrectly in the text). For one thing, it's asymmetric
-// (it should be p1(1-p2) + p2(1-p1), but they wrote
-// p1(1-p2) + p1(1-p2). whoops!
-
-// To avoid confusion
-// let's just stick w/ the 1-Hw/Hb formulation, which is also defined in the SOM.
-
-#define FST_HUDSON(p,q) (  1.0-( (p*(1.0-p) + q*(1.-q)) / (p*(1.0-q) + q*(1.-p)) )  )
 
 const std::string DEFAULT_FST_TAG = "meanFst";
 
 // -10.0/ln(10)
 // useful when converting log likelihoods (LN)
 // to phred-scaled likelihoods (-10*log10(like))
-const double PHRED_SCALAR = -4.3429448190325175;
+const double PHRED_SCALAR = -4.34294481903251;
 
 const double DEFAULT_MAX_FST=0.05;
 
@@ -106,35 +115,34 @@ typedef struct {
   uint32_t filter; // SAM_FLAG filter
   uint32_t include_filter; // SAM_FLAG filter
   double mixtureFraction; // can be passed in, or estimated by ML
-  double downsampleFraction; //
+  double downsampleFraction; // while parsing a bam, reads are dropped w/ this probability 
+  double desiredCoverage; // post-hoc filter (after bam parsing), to a specified read depth
   bool filterIndelAdjacent;
   bool help;
-  bool trustQualities;
+  bool trustQualities; // uses the base quality values directly; otherwise all BQs are minBaseQuality
+  bool recalibrateQualities; // with trust Qualities; this empirically recalibrates the BQ values
   const char *knownBcf; // known genotypes. at most 1 known contributor
-  const char *lowFstBcf;  // low FST snps; used to estimate MF
+  const char *inBcf;  // VCF file in question.
   const char *referenceFasta; // needed for cram support.
+  const char *describeFilename; // when demixing, the file MADE (DESCRIBE) by demixtify.
   char *bamFilename;
   char *bedFilename;
+  std::string summaryFilenameRoot;
+  
   const char *outCounts;
   std::string outVCF;
   std::string fstTag; // contains the population allele frequency TAGS (eg, AF_nfe) used to estimate FST
-  double fstFilt;
   const char* AFtag;
-  float maxFst; // FSTs are capped at this value
+  double maxFstT; // FSTs are capped at this value
+  double maxFstD; // FSTs are dropped if they exceed this value
   bool parseVcf; // the "bed" file may either be .bed (simulations) or .vcf (real data)
+  unsigned char chisqIndex; // see CHISQ[] data structure; which one do we want?
 } Options;
 
 typedef struct {
   char b; // basecall 
   unsigned char q; // quality;
 } BQ;
-
-typedef struct {
-  std::vector<unsigned char> refQuals; // not really reference; alleles of type 1 or 2. count the number of bases of sufficient quality
-  std::vector<unsigned char> altQuals; // ditto for the other (alt) allele
-  unsigned otherCount; // basecounts that pass filters and are neither type 1 nor type 2 
-  unsigned badCount;  // the number of reads at the site that fail the QC filters
-} BaseCounter;
 
 
 // not strictly necessary, but for convenience, let's encode the
@@ -171,10 +179,20 @@ int getGenoIterators(const std::string &known, char type, int *itr);
 #define MINOR 2
 #define ALL   3
 
+// note unsafe macros; no () are used to encompass each variable. take care when you invoke these macros.
+
 #define GENOPROB(c, a)       ( c[0]=='A' && c[1]=='A' ? (1-a)*(1-a)             : (c[0]=='B' && c[1]=='B' ? (a)*(a)             : 2*(1-a)*a))
 
 // theta-corrected
 #define GENOPROBFST(c, a, f) ( c[0]=='A' && c[1]=='A' ? ((1-a)*(1-a)+(1-a)*a*f) : (c[0]=='B' && c[1]=='B' ? ((a)*(a)+(1-a)*a*f) : 2*(1-a)*a*(1.-f) ))
+
+#define BN_DENOM(f) ( (1+f)*(1+f+f) )
+// full balding/nichols; allele probability p, fst f
+#define GENOPROB_BN_AA(p, f) ( (  ((f+f) + (1-f)*p)*( (f+f+f) + (1-f)*p) ) / BN_DENOM(F) )
+#define GENOPROB_BN_AB(pa, pb, f) ( 2*(  ((f+(1-f)*pa))((f+(1-f)*pb))/ BN_DENOM(F) ) )
+
+#define GENOPROB_BN(c, a, f) (  c[0]=='A' && c[1]=='A' ? GENOPROB_BN_AA( (1-a), f) : \
+				(c[0]=='B' && c[1]=='B' ? GENOPROB_BN_AA( a, f ) : GENOPROB_BN_AB( (1-a), a, f) )   )
 
 // Meat and potatoes!
 // this takes in a single locus and fills out a BaseCounter struct
@@ -195,7 +213,7 @@ bool summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, 
 // Note that *results MAY BE NULL
 // if it is, then just the genotypes are extracted.
 // otherwise the DP field is used to populate the BaseCounter object
-void *readLowFstPanel(const char *fname, std::vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, float maxFst);
+void *readPanel(const char *fname, std::vector<Locus> &loci, BaseCounter *results, const char* AFtag, const char* fstTag, double maxFstD, double maxFstT);
 
 bool readBed(char *filename, std::vector<Locus> &loci, std::vector<BaseCounter> &tmpResults, const Options &opt);
 
@@ -231,6 +249,9 @@ bool validNuc(char c);
 #define LOG_SUM_EXP_PAIR(L1, L2) ( (L1)>(L2) ? log( exp((L2)-(L1)) + 1. )+(L1) : log( exp((L1)-(L2)) + 1. )+(L2) )
 #define LOG_SUM_EXP_PAIR_NAIVE(L1, L2) ( log(exp(L1)+exp(L2)))
 
+
+
+
 // converts all proposed genotypes  e.g., (AAAB == AA individual 1, AB indivual 2)
 // and the propsed mixture fraction (eg, mf==70% of reads come from individual 1)
 // into the expected proportion of reads associated with an "A" allele
@@ -240,6 +261,9 @@ void genotypesToAlleleWeights(double mf, double *w);
 // computes the 9 likelihoods associated with a pair of counts on A and B alleles
 void computeLikesWithM(const BaseCounter *b, double *w, double e, double out[N_GENOS], double altFreq, double fst, bool trustQualities);
 
+// downsampling routines. These are applied when we downsample by *coverage*.
+void downsampleVec(std::vector<unsigned char> &r, double ds);
+void posthocDownsample(std::vector<BaseCounter> &b, double ds);
 
 int csv2vec(const char* s, std::vector<std::string> *vec);
 int csv2vec(const char* s, std::vector<double> *vec);
@@ -275,5 +299,15 @@ VcfIterator initVcfIterator(const char *filename, int knownIndex, bool needidx);
 bool closeVcfIterator(VcfIterator &vcf);
 
 char vcfGetGenotype(VcfIterator &vcf, Locus &loc, int knownIndex);
+
+// single threaded implementation
+// estimates the mixture fraction
+// AND reports the corresponding likelihoods
+// &est is assumed to be preallocated to the correct size.
+double estimateMF_1Thread(const BaseCounter *counts,  std::vector<Locus> *loci, const Options *opt, double error, std::vector<MFest> &est, unsigned *nsnps);
+
+
+// writes a text-based report of the data
+void writeTextReport(std::vector<MFest> &mfs, char mode, SampleStats &ss, Options &opt);
 
 #endif
