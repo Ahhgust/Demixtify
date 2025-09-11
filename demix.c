@@ -10,14 +10,6 @@
 #include <limits>
 #include <set>
 #include <chrono>
-
-#ifdef C11THREADS
-#include <threads.h> //c11 threads. which, as it turns out, are very poorly supported
-#else
-#include <thread> // c++11 threads, which apparently are much more standard
-#endif
-
-
 #include <iomanip>
 #include <assert.h>
 #include <random>
@@ -152,19 +144,13 @@ die(const char *arg0, const char *extra) {
     endl << "All things stats:" << endl <<
     "\t-w maxFst (discards snps with FST larger than maxFst Default: 1.0)" << endl<<
     "\t-x xmaxFst (truncates FSTs to be no larger than tmaxFst; Default: 1.0)" << endl <<
-    "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << DEFAULT_NGRID  << endl <<
+    "\t-g grid_size (for the grid-search on mixture fraction; the size of the grid (i.e., the precision)). Default: " << std::dec << DEFAULT_NGRID  << endl <<
     "\t-a chisquare_index (1-5; 1: 0.10, 2: 0.05, 3: 0.01, 4: 0.005, 5: 0.001); draws confidence intervals (CIs) using pre-specified alpha values from a chi square table. Default: 3 (0.01, aka 99% CIs)" << endl <<
     "\t-p mixture_proportion (the mixture proportion; if unspecified, this is estimated)" << endl << endl <<    
  
     "For either of the filter options (-f/-F) see:" << endl <<
     "https://broadinstitute.github.io/picard/explain-flags.html" << endl << endl <<
     "Information for estimating the mixture fraction" << endl << endl;
-
-
-
-
-
-
 
 
   exit(EXIT_FAILURE);
@@ -176,6 +162,7 @@ validNuc(char c) {
     return true;
   return false;
 }
+
 
 bool
 parseOptions(char **argv, int argc, Options &opt, char mode) {
@@ -295,6 +282,7 @@ parseOptions(char **argv, int argc, Options &opt, char mode) {
 	      opt.ngrid = max(atoi(argv[i]), 2);
 	    } else if (flag == 'V') {
 	      opt.outVCF = string(argv[i]);
+
 	    } else if (flag == 'S') {
 	      opt.summaryFilenameRoot = string(argv[i]); // input
 	    } else if (flag == 'b') {
@@ -308,10 +296,10 @@ parseOptions(char **argv, int argc, Options &opt, char mode) {
 	    } else if (flag == 'a') {
 	      int chisq = atoi(argv[i]);
 	      if (chisq < 1 || chisq > 5) {
-		cerr << "Specify alpha by indices 1-5; 1: 0.10, 2: 0.05, 3: 0.01, 4: 0.005, 5: 0.001" << endl;
-		++errors;
+			cerr << "Specify alpha by indices 1-5; 1: 0.10, 2: 0.05, 3: 0.01, 4: 0.005, 5: 0.001" << endl;
+			++errors;
 	      } else {
-		opt.chisqIndex = static_cast<unsigned char>(chisq-1);
+			opt.chisqIndex = static_cast<unsigned char>(chisq-1);
 	      }
 	    } else if (flag == '-') {
 		break; // respect unix-style -- to end the arguments
@@ -342,8 +330,6 @@ parseOptions(char **argv, int argc, Options &opt, char mode) {
 	  ++errors;
 	}
 
-	
-	
 	
 	if (errors)
 	  return false;
@@ -852,8 +838,6 @@ summarizeAllRegions(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, s
     exit(1);
   }
   
-  // cerr << "Bam parsing begin" << endl;
-
 
   int offset;
   uint32_t *cigar;
@@ -1533,7 +1517,7 @@ estimateMF_1Thread(const BaseCounter *counts,  vector<Locus> *loci, const Option
     gridSize=0; // note that we search gridSize+1, so this ensures loops happen once.
     gridSizeD=1.;
   }
-  cerr << "estimate MF?\n";
+
   
   if (haveKnowns) {
     // nIndexes==3 in all cases.
@@ -1818,6 +1802,388 @@ closeVcfWriter(VcfWriter &writer, const Options &opt) {
       cerr << "Some problem writing the B/VCF file index. That's not good!" << endl;
   }
 }
+
+
+// heavily influenced by: https://github.com/odelaneau/GLIMPSE/blob/master/phase/src/io/genotype_writer.cpp
+// see also: http://broadinstitute.github.io/gamgee/doxygen/hts_8h.html
+void
+writeVcf(Options &opt, double mf, double error, VcfWriter *writer) {
+
+
+  unsigned len, i;
+
+
+    writer->file_format = "wb";
+    writer->filename=opt.outVCF;
+    
+    if (opt.outVCF != "-") {
+      len = opt.outVCF.length();
+      if (len > 4 && opt.outVCF[len-1] == 'f' &&  opt.outVCF[len-2] == 'c'  && opt.outVCF[len-3] == 'v')
+	writer->file_format = "w"; // uncompressed VCF if that's what's asked for.
+    }
+	      
+    writer->fp = hts_open(opt.outVCF.c_str(),writer->file_format.c_str());
+    
+    if (opt.numThreads > 1)
+      hts_set_threads(writer->fp, opt.numThreads);
+
+
+    writer->hdr = bcf_hdr_init("w"); 
+    
+    bcf_hdr_append(writer->hdr, string("##source=Demixtify v" + std::string(VERSION)).c_str());
+    bcf_hdr_append(writer->hdr, string("##mixturefraction=" + std::to_string(mf)).c_str()); // yay c++11!
+    bcf_hdr_append(writer->hdr, string("##empiricalerror=" + std::to_string(error)).c_str());
+    // log key items from how this file was made
+    bcf_hdr_append(writer->hdr, string("##bamFile=" + std::string(opt.bamFilename)).c_str() );
+    bcf_hdr_append(writer->hdr, string("##maxFstT=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.maxFstT)).c_str() );
+
+  // and clearly state hypotheses (along w/ reminders as to what was used)
+    if (opt.knowns) {
+      bcf_hdr_append(writer->hdr, string("##hypothesis=1known+1unknown").c_str() );
+      bcf_hdr_append(writer->hdr, string("##knownIndex=" + std::to_string(opt.knowns)).c_str() );
+      bcf_hdr_append(writer->hdr, string("##knownFile=" + std::string(opt.knownBcf)).c_str() );
+    } else
+      bcf_hdr_append(writer->hdr, string("##hypothesis=2unknowns").c_str() );
+
+	// walk thru each locus; note which chromosomes were evaluated
+	// and write out which chromosomes are present in the VCF
+	std::vector<Locus> *loci = writer->loci;
+	BaseCounter *counts = writer->results;
+
+	std::string chrom = "";
+	std::string thischrom = "";
+	
+	// keep track of when we start a new chromosome.
+	std::vector<uint32_t> chromBreaks;
+	i=0;
+	for (std::vector<Locus>::iterator it = loci->begin(); it != loci->end(); ++it, ++counts, ++i) {
+
+		if (counts->badCount ==SKIP_SNP)
+			continue;
+	  
+		if (! matchRegToChrom((it->region).c_str(), thischrom.c_str() ) ) {
+				// extracts chr1 from chr1:100-300
+			size_t sPos = (it->region).find(':');
+			if (sPos == (it->region).length()) {
+				cerr << "Parse error with: " << it->region << endl;
+				exit(1);
+			}
+			std::string ochrom( it->region, 0, sPos);
+			cerr << "Writing " << ochrom << endl;
+			bcf_hdr_append(writer->hdr, std::string("##contig=<ID="+ ochrom  + ">").c_str());		
+			if (chrom == "") // useful to know which chromosome is first...
+				thischrom=chrom=ochrom; 
+			else {		
+				thischrom=ochrom;
+				chromBreaks.push_back(i);
+			}
+		}
+			
+	}
+	
+
+    bcf_hdr_append(writer->hdr, "##FILTER=<ID=CL,Description=\"Site provides conditional likelihood\">");
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=AF,Number=1,Type=Float,Description=\"ALT allele frequency\">");
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=JL,Number=9,Type=Float,Description=\"Joint genotype ln-likelihoods, unnormalized, in this order (Minor|Major): AA|AA,AA|AB,AA|BB,AB|AA, ... BB|BB, \">");  
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=AD,Number=2,Type=Integer,Description=\"Allele Depth; Ref,Alt; filtered\">");
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=OTH,Number=1,Type=Integer,Description=\"Number of non-ref/alt bases; no annotation means 0\">");
+  
+    bcf_hdr_append(writer->hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotypes\">");
+    bcf_hdr_append(writer->hdr, "##FORMAT=<ID=PL,Number=G,Type=Integer,Description=\"Genotype likelihoods; Phred scaled, marginal\">");
+    bcf_hdr_append(writer->hdr, "##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality; Phred scaled, taken as likelihood(genotype call is right)/likelihood(wrong)\">");
+
+
+    if (!opt.knowns) {
+      bcf_hdr_add_sample(writer->hdr, "Major");
+      bcf_hdr_add_sample(writer->hdr, "Minor");
+    } else  if (mf > 0.5) { // minor is unknown
+      bcf_hdr_add_sample(writer->hdr, "Unknown");
+      bcf_hdr_add_sample(writer->hdr, "Known");
+
+    } else {
+      bcf_hdr_add_sample(writer->hdr, "Known");
+      bcf_hdr_add_sample(writer->hdr, "Unknown");
+    }
+    
+    bcf_hdr_add_sample(writer->hdr, NULL);      // to update internal structures ; may or may not be necessary?!
+  
+    if (bcf_hdr_write(writer->fp, writer->hdr) ) {
+      cerr << "Failed to write header to file: " << opt.outVCF << endl;
+      exit(1);
+    }
+  
+
+  bcf1_t *rec = bcf_init1();
+
+  /* data structures for converting allele counts into mixed/unmixed genotypes */
+  int AAindexes[N_GENOS];
+  int ABindexes[N_GENOS];
+  int BBindexes[N_GENOS];
+
+  int AAindexesMinor[N_GENOS];
+  int ABindexesMinor[N_GENOS];
+  int BBindexesMinor[N_GENOS];
+  
+  int *idx;
+
+  double marginalLikes[N_MARGINALS];
+  
+  getGenoIterators("AA", MAJOR, AAindexes);
+  getGenoIterators("AB", MAJOR, ABindexes);
+  getGenoIterators("BB", MAJOR, BBindexes);
+  
+  getGenoIterators("AA", MINOR, AAindexesMinor);
+  getGenoIterators("AB", MINOR, ABindexesMinor);
+  getGenoIterators("BB", MINOR, BBindexesMinor);
+
+  // convert genotypes + mixture fractions to allele weights
+  double aweights[N_GENOS];
+  genotypesToAlleleWeights( mf, aweights);
+
+  double genolikes[N_GENOS];
+  float genolikesf[N_GENOS];
+  int phredlikes[N_MARGINALS];
+
+
+  //Add records
+  // 5: 2 diploid samples (4) + 1 null record (bcf_int32_vector_end)
+  int bcfgenotypes[5];
+  int clID = bcf_hdr_id2int(writer->hdr,  BCF_DT_ID, "CL");
+
+
+  // Stuff we need to process bam 
+  bam1_t *b = bam_init1();
+  samFile *in = sam_open(opt.bamFilename, "r");
+  if (in == NULL)
+    exit(EXIT_FAILURE);
+
+  if (opt.numThreads>1)
+    hts_set_threads(in, opt.numThreads);
+  
+  initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
+      
+  sam_hdr_t *header = sam_hdr_read(in);
+  if (header == NULL)
+    exit(EXIT_FAILURE);
+  
+  hts_idx_t *bamidx;  // initiate a BAM index
+  bamidx = sam_index_load(in, opt.bamFilename);   // second parameter is same as BAM file path
+  if (bamidx == NULL) {
+    cerr << "Failed to load index for " << opt.bamFilename << endl;
+    exit(EXIT_FAILURE);
+  }
+  
+  uint32_t chromIndex = 0; // definitional, since we wrote the header   
+
+	// reinitialize pointers...	
+  loci = writer->loci;
+  counts = writer->results;
+  
+  uint32_t breakIndex=0;
+  uint32_t breakCounter=0;
+
+  
+  for (std::vector<Locus>::iterator it = loci->begin(); it != loci->end(); ++it, ++counts, ++breakCounter) {
+    if (counts->badCount ==SKIP_SNP)
+		continue;
+    // clear datums...
+    bcf_clear1(rec);
+	
+	if (breakIndex < chromBreaks.size() && chromBreaks[breakIndex]==breakCounter) {
+		++breakIndex;
+		++chromIndex;
+	}
+	
+    rec->rid = chromIndex;
+    rec->pos = it->pos-1; // convert from 1- to 0-based coordinate
+    
+    // add ref and alt allele categories
+    std::string alleles = std::string(1, it->allele1) + "," + std::string(1, it->allele2);
+    bcf_update_alleles_str(writer->hdr, rec, alleles.c_str());
+    
+    
+#if DEBUG
+    cerr << *it << endl;
+    cerr << *counts << endl;
+#endif
+    
+    // default genotypes set to 0/0 (common case)
+    std::fill(bcfgenotypes, bcfgenotypes + 4, bcf_gt_unphased(false));
+    bcfgenotypes[4] = bcf_int32_vector_end;
+    
+    // -1s turn off posterior prob calc
+    // todo: use equation 3
+    computeLikesWithM(counts, aweights, error, genolikes, -1, -1, opt.trustQualities);
+
+    if (!opt.knowns || it->genotypecall==NOCALL ) {
+      
+      // corner case; minor is known, in which case the joint genotype matrix is flipped
+      if (mf > 0.5)
+		computeMarginals(AAindexesMinor,ABindexesMinor,BBindexesMinor,AAindexes,ABindexes,BBindexes,genolikes,marginalLikes);
+      else
+		computeMarginals(AAindexes,ABindexes,BBindexes,AAindexesMinor,ABindexesMinor,BBindexesMinor,genolikes,marginalLikes);
+      
+      //computeMarginals(AAindexes,ABindexes,BBindexes,AAindexesMinor,ABindexesMinor,BBindexesMinor,genolikes,marginalLikes);
+      //logLikeToPL(const double *in, int n, int *out) {
+      logLikeToPL(marginalLikes, 3, phredlikes); 
+      logLikeToPL(marginalLikes+3, 3, phredlikes+3); 
+
+      int g;
+      g = LIKES_TO_GENO(marginalLikes[0], marginalLikes[1], marginalLikes[2]);
+	
+      if (g == AB) {
+		bcfgenotypes[1] = bcf_gt_unphased(true);
+      } else if (g==BB) {
+		bcfgenotypes[0] = bcf_gt_unphased(true);
+		bcfgenotypes[1] = bcf_gt_unphased(true);
+	  }
+
+      g = LIKES_TO_GENO(marginalLikes[3], marginalLikes[4], marginalLikes[5]);      
+      
+      if (g == AB) {
+		bcfgenotypes[3] = bcf_gt_unphased(true);
+      } else if (g==BB) {
+		bcfgenotypes[2] = bcf_gt_unphased(true);
+		bcfgenotypes[3] = bcf_gt_unphased(true);
+      }
+
+      
+    } else {
+
+      bcf_update_filter(writer->hdr, rec, &clID, 1);
+      // and given what we know, grab the appropriate set of 3 genotypes of the joint likelihoods,
+
+      idx = AAindexesMinor;
+      if (it->genotypecall == AB) {
+		idx = ABindexesMinor;
+      } else if (it->genotypecall == BB) {
+		idx = BBindexesMinor;
+      }
+      
+
+      for (i=0; i < 3; ++i, ++idx) {
+		marginalLikes[i] = genolikes[ *idx ];
+      }
+      
+      int g = LIKES_TO_GENO(marginalLikes[0], marginalLikes[1], marginalLikes[2]);
+
+	
+      // this can be simplified... (mf is fixed...)
+      if (mf > 0.5) { // minor is unknown
+	if (g == AB) {
+	  bcfgenotypes[1] = bcf_gt_unphased(true);
+	} else if (g==BB) {
+	  bcfgenotypes[0] = bcf_gt_unphased(true);
+	  bcfgenotypes[1] = bcf_gt_unphased(true);
+	}
+
+	if (it->genotypecall == AB) {
+	  bcfgenotypes[3] = bcf_gt_unphased(true);
+	  
+	  phredlikes[3] = KNOWN_PL;
+	  phredlikes[4] = 0;
+	  phredlikes[5] = KNOWN_PL;
+	} else if (it->genotypecall == BB) {
+	  bcfgenotypes[3] = bcf_gt_unphased(true);
+	  bcfgenotypes[2] = bcf_gt_unphased(true);
+	  
+	  phredlikes[3] = KNOWN_PL;
+	  phredlikes[4] = KNOWN_PL;
+	  phredlikes[5] = 0;
+	} else {
+	  phredlikes[3] = 0;
+	  phredlikes[4] = KNOWN_PL;
+	  phredlikes[5] = KNOWN_PL;
+	}
+	  
+	logLikeToPL(marginalLikes, 3, phredlikes); // conditional PLs; the first 3
+
+	
+      } else {
+	
+	if (g == AB) {
+	  bcfgenotypes[3] = bcf_gt_unphased(true);
+	} else if (g==BB) {
+	  bcfgenotypes[2] = bcf_gt_unphased(true);
+	  bcfgenotypes[3] = bcf_gt_unphased(true);
+	}
+	
+	if (it->genotypecall == AB) {
+	  bcfgenotypes[1] = bcf_gt_unphased(true);
+	  phredlikes[0] = KNOWN_PL;
+	  phredlikes[1] = 0;
+	  phredlikes[2] = KNOWN_PL;
+	  
+	} else if (it->genotypecall == BB) {
+	  bcfgenotypes[1] = bcf_gt_unphased(true);
+	  bcfgenotypes[0] = bcf_gt_unphased(true);
+	    
+	  phredlikes[0] = KNOWN_PL;
+	  phredlikes[1] = KNOWN_PL;
+	  phredlikes[2] = 0;
+	} else {
+	  phredlikes[0] = 0;
+	  phredlikes[1] = KNOWN_PL;
+	  phredlikes[2] = KNOWN_PL;
+	}
+	  
+	logLikeToPL(marginalLikes, 3, phredlikes+3); // conditional PLs; the last 3
+      }
+    }
+
+
+
+    int32_t ad[3];
+    ad[0] = counts->refQuals.size();
+    ad[1] = counts->altQuals.size();
+    ad[2]=bcf_int32_vector_end;
+    bcf_update_info_int32(writer->hdr, rec, "AD", ad, 2);
+    if (counts->otherQuals.size()) {
+      int32_t dp = counts->otherQuals.size();
+      bcf_update_info_int32(writer->hdr, rec, "OTH", &dp, 1);
+    }
+    
+    
+    // cast into floats
+    for(i=0; i < N_GENOS; ++i)
+      genolikesf[i] = genolikes[i];
+
+    bcf_update_info_float(writer->hdr, rec, "JL", genolikesf, N_GENOS);
+    
+    bcf_update_genotypes(writer->hdr, rec, bcfgenotypes, 4);
+    bcf_update_format_int32(writer->hdr, rec, "PL", phredlikes, 6);
+
+
+    int32_t genoQuals[2];
+    if (!opt.knowns || it->genotypecall==NOCALL ) {
+      genoQuals[0] = getGQ(marginalLikes); // considers the three marginal likelihoods for id1
+      genoQuals[1] = getGQ(&(marginalLikes[3])); // and again, for id2
+    } else if (mf > 0.5) { // minor is unknown
+      genoQuals[0] = getGQ(marginalLikes);
+      genoQuals[1] = KNOWN_PL;
+    } else {
+      genoQuals[1] = getGQ(marginalLikes);
+      genoQuals[0] = KNOWN_PL;
+    }
+	     
+    bcf_update_format_int32(writer->hdr, rec, "GQ", genoQuals, 2);
+    
+    if (bcf_write1(writer->fp, writer->hdr, rec) ) {
+      cerr << "Write error. That's not good." << endl;
+      exit(1);
+    }
+  }
+
+  bam_destroy1(b);
+  bam_hdr_destroy(header);
+  sam_close(in);
+  hts_idx_destroy(bamidx);
+  
+  bcf_destroy1(rec);
+
+
+}
+
 
 // heavily influenced by: https://github.com/odelaneau/GLIMPSE/blob/master/phase/src/io/genotype_writer.cpp
 // see also: http://broadinstitute.github.io/gamgee/doxygen/hts_8h.html
@@ -2216,412 +2582,6 @@ writeOneChrom(Options &opt, unsigned chromosome, double mf_hat, double error, Vc
 }
 
 
-// heavily influenced by: https://github.com/odelaneau/GLIMPSE/blob/master/phase/src/io/genotype_writer.cpp
-// see also: http://broadinstitute.github.io/gamgee/doxygen/hts_8h.html
-void
-writeVcf(double mf, double error, vector<Locus> *loci, Options &opt) {
-
-
-  unsigned len;
-  std::string file_format = "wb";
-  unsigned i;
-  
-  if (opt.outVCF != "-") {
-    len = opt.outVCF.length();
-    if (len > 4 && opt.outVCF[len-1] == 'f' &&  opt.outVCF[len-2] == 'c'  && opt.outVCF[len-3] == 'v')
-      file_format = "w"; // uncompressed VCF if that's what's asked for.
-  }
-	      
-  htsFile * fp = hts_open(opt.outVCF.c_str(),file_format.c_str());
-  if (opt.numThreads > 1)
-    hts_set_threads(fp, opt.numThreads);
-
-
-  bcf_hdr_t *hdr = bcf_hdr_init("w");
-  
-  
-  bcf_hdr_append(hdr, string("##source=Demixtify v" + std::string(VERSION)).c_str());
-  bcf_hdr_append(hdr, string("##mixturefraction=" + std::to_string(mf)).c_str()); // yay c++11!
-  bcf_hdr_append(hdr, string("##empiricalerror=" + std::to_string(error)).c_str());
-  // log key items from how this file was made
-  bcf_hdr_append(hdr, string("##bamFile=" + std::string(opt.bamFilename)).c_str() );
-  bcf_hdr_append(hdr, string("##fstFilt=" + std::string(opt.fstTag) + ";" +  std::to_string(opt.maxFstT)).c_str() );
-
-  // and clearly state hypotheses (along w/ reminders as to what was used)
-  if (opt.knowns) {
-    bcf_hdr_append(hdr, string("##hypothesis=1known+1unknown").c_str() );
-    bcf_hdr_append(hdr, string("##knownIndex=" + std::to_string(opt.knowns)).c_str() );
-    bcf_hdr_append(hdr, string("##knownFile=" + std::string(opt.knownBcf)).c_str() );
-  } else
-    bcf_hdr_append(hdr, string("##hypothesis=2unknowns").c_str() );
-
-
-  
-  
-  // extract out the chromosomes used...
-  std::string prev("");
-  std::string thisc("");
-  
-  for (std::vector<Locus>::iterator it = loci->begin(); it != loci->end(); ++it) {
-    len = it->region.length();
-    
-    for (i=0; i < len; ++i) {
-      if (it->region[i] == ':') {
-	thisc = it->region.substr(0, i);
-	break;
-      }
-    }
-
-    if (i==len) {
-      cerr << "Should never happen " << it->region << endl;
-      exit(1);
-    }
-
-    if (prev != thisc) 
-      bcf_hdr_append(hdr, std::string("##contig=<ID="+ thisc + ">").c_str());
-    
-    prev = thisc;
-  }
-
-  bcf_hdr_append(hdr, "##FILTER=<ID=CL,Description=\"Site provides conditional likelihood\">");
-  bcf_hdr_append(hdr, "##INFO=<ID=AF,Number=1,Type=Float,Description=\"ALT allele frequency\">");
-  bcf_hdr_append(hdr, "##INFO=<ID=JL,Number=9,Type=Float,Description=\"Joint genotype ln-likelihoods, unnormalized, in this order (Minor|Major): AA|AA,AA|AB,AA|BB,AB|AA, ... BB|BB, \">");  
-  bcf_hdr_append(hdr, "##INFO=<ID=AD,Number=2,Type=Integer,Description=\"Allele Depth; Ref,Alt; filtered\">");
-  bcf_hdr_append(hdr, "##INFO=<ID=OTH,Number=1,Type=Integer,Description=\"Number of non-ref/alt bases; no annotation means 0\">");
-  
-  bcf_hdr_append(hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotypes\">");
-  bcf_hdr_append(hdr, "##FORMAT=<ID=PL,Number=G,Type=Integer,Description=\"Genotype likelihoods; Phred scaled, marginal\">");
-  bcf_hdr_append(hdr, "##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality; Phred scaled, taken as likelihood(genotype call is right)/likelihood(wrong)\">");
-
-
-
-  bcf_hdr_add_sample(hdr, "Major");
-  bcf_hdr_add_sample(hdr, "Minor");
-  bcf_hdr_add_sample(hdr, NULL);      // to update internal structures ; may or may not be necessary?!
-  
-  if (bcf_hdr_write(fp, hdr) ) {
-    cerr << "Failed to write header to file: " << opt.outVCF << endl;
-    exit(1);
-  }
-
-  bcf1_t *rec = bcf_init1();
-
-  /* data structures for converting allele counts into mixed/unmixed genotypes */
-  int AAindexes[N_GENOS];
-  int ABindexes[N_GENOS];
-  int BBindexes[N_GENOS];
-
-  int AAindexesMinor[N_GENOS];
-  int ABindexesMinor[N_GENOS];
-  int BBindexesMinor[N_GENOS];
-  
-  int *idx;
-
-  double marginalLikes[N_MARGINALS];
-  
-  getGenoIterators("AA", MAJOR, AAindexes);
-  getGenoIterators("AB", MAJOR, ABindexes);
-  getGenoIterators("BB", MAJOR, BBindexes);
-  
-  getGenoIterators("AA", MINOR, AAindexesMinor);
-  getGenoIterators("AB", MINOR, ABindexesMinor);
-  getGenoIterators("BB", MINOR, BBindexesMinor);
-
-  // convert genotypes + mixture fractions to allele weights
-  double aweights[N_GENOS];
-  genotypesToAlleleWeights( mf, aweights);
-
-  double genolikes[N_GENOS];
-  float genolikesf[N_GENOS];
-  int phredlikes[N_MARGINALS];
-
-
-  //Add records
-  // 5: 2 diploid samples (4) + 1 null record (bcf_int32_vector_end)
-  int bcfgenotypes[5];
-  int clID = bcf_hdr_id2int(hdr,  BCF_DT_ID, "CL");
-
-  VcfIterator knownVcf;
-  if (opt.knowns) {
-    knownVcf=initVcfIterator(opt.knownBcf, opt.knowns, true);
-  }
-  // note bedFilename is a misnomer; it's just an input filename
-  VcfIterator wgsPanel = initVcfIterator(opt.bedFilename, 0, false);
-  Locus loc;
-  BaseCounter counts;
-
-  // Stuff we need to process bam 
-  bam1_t *b = bam_init1();
-  samFile *in = sam_open(opt.bamFilename, "r");
-  if (in == NULL)
-    exit(EXIT_FAILURE);
-
-  if (opt.numThreads>1)
-    hts_set_threads(in, opt.numThreads);
-  
-  initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
-      
-  sam_hdr_t *header = sam_hdr_read(in);
-  if (header == NULL)
-    exit(EXIT_FAILURE);
-  
-  hts_idx_t *bamidx;  // initiate a BAM index
-  bamidx = sam_index_load(in, opt.bamFilename);   // second parameter is same as BAM file path
-  if (bamidx == NULL) {
-    cerr << "Failed to load index for " << opt.bamFilename << endl;
-    exit(EXIT_FAILURE);
-  }
-
-  loc.af = loc.Fst=0.0;
-  
-  //  for (std::vector<Locus>::iterator it = loci->begin(); it != loci->end(); ++it, ++counts) {
-  while ( bcf_read(wgsPanel.fp, wgsPanel.hdr, wgsPanel.rec)>=0 ) {
-    bcf_unpack(wgsPanel.rec, BCF_UN_STR);
-
-    if (!bcf_is_snp(wgsPanel.rec) || wgsPanel.rec->n_allele > 2)
-      continue;
-      // Clear current VCF record
-    bcf_clear1(rec);
-    counts.refQuals.clear();
-    counts.altQuals.clear();
-    counts.otherQuals.clear();
-    counts.badCount=0;
-    
-    // todo; consider merging headers...
-    string ch( bcf_hdr_id2name(wgsPanel.hdr, wgsPanel.rec->rid));    
-    rec->rid = bcf_hdr_name2id(hdr, ch.c_str()); 
-    rec->pos = wgsPanel.rec->pos;
-
-    // make a locus object
-    loc.region=ch + ":" + std::to_string(wgsPanel.rec->pos+1) + "-" + std::to_string(wgsPanel.rec->pos+1);
-    loc.allele1 = wgsPanel.rec->d.allele[0][0];
-    loc.allele2 = wgsPanel.rec->d.allele[1][0];
-    loc.pos = wgsPanel.rec->pos+1;
-    loc.genotypecall=NOCALL;
-
-    // add ref and alt allele categories
-    std::string alleles = std::string(1, loc.allele1) + "," + std::string(1, loc.allele2);
-    bcf_update_alleles_str(hdr, rec, alleles.c_str());
-
-    // fill in the counts data (bam processing)
-    if (! summarizeRegion(in, b, header, bamidx, &loc, counts, opt)) {
-      cerr << "Skipping region " << loc.region << endl; // when this happen results[i].bad == UINT_MAX
-      continue;
-    }
-
-    // fill in the known genotype (if the SNP has been typed)
-    if (opt.knowns) {
-      loc.genotypecall=vcfGetGenotype(knownVcf, loc, opt.knowns);
-    }
-    
-#if DEBUG
-    cerr << loc <<  " " << (unsigned) loc.genotypecall << endl;
-    cerr << counts << endl;
-#endif
-    
-    // default genotypes set to 0/0 (common case)
-    std::fill(bcfgenotypes, bcfgenotypes + 4, bcf_gt_unphased(false));
-    bcfgenotypes[4] = bcf_int32_vector_end;
-    
-    // -1s turn off posterior prob calc
-    // todo: use equation 3
-    computeLikesWithM(&counts, aweights, error, genolikes, -1, -1, opt.trustQualities);
-
-    if (!opt.knowns || loc.genotypecall==NOCALL ) {
-      
-      // corner case; minor is known, in which case the joint genotype matrix is flipped
-      if (mf > 0.5)
-	computeMarginals(AAindexesMinor,ABindexesMinor,BBindexesMinor,AAindexes,ABindexes,BBindexes,genolikes,marginalLikes);
-      else
-	computeMarginals(AAindexes,ABindexes,BBindexes,AAindexesMinor,ABindexesMinor,BBindexesMinor,genolikes,marginalLikes);
-      
-      //computeMarginals(AAindexes,ABindexes,BBindexes,AAindexesMinor,ABindexesMinor,BBindexesMinor,genolikes,marginalLikes);
-      //logLikeToPL(const double *in, int n, int *out) {
-      logLikeToPL(marginalLikes, 3, phredlikes); 
-      logLikeToPL(marginalLikes+3, 3, phredlikes+3); 
-
-      int g;
-      g = LIKES_TO_GENO(marginalLikes[0], marginalLikes[1], marginalLikes[2]);
-	
-      if (g == AB) {
-	bcfgenotypes[1] = bcf_gt_unphased(true);
-      } else if (g==BB) {
-	bcfgenotypes[0] = bcf_gt_unphased(true);
-	bcfgenotypes[1] = bcf_gt_unphased(true);
-      }
-
-      g = LIKES_TO_GENO(marginalLikes[3], marginalLikes[4], marginalLikes[5]);      
-      
-      if (g == AB) {
-	bcfgenotypes[3] = bcf_gt_unphased(true);
-      } else if (g==BB) {
-	bcfgenotypes[2] = bcf_gt_unphased(true);
-	bcfgenotypes[3] = bcf_gt_unphased(true);
-      }
-
-      
-    } else {
-
-      bcf_update_filter(hdr, rec, &clID, 1);
-      // and given what we know, grab the appropriate set of 3 genotypes of the joint likelihoods,
-      /*
-      if (mf > 0.50) {
-	
-	idx = AAindexes;
-	if (loc.genotypecall == AB)
-	  idx = ABindexes;
-	else if (loc.genotypecall == BB)
-	  idx = BBindexes;
-	
-	  
-      } else {
-      */
-	idx = AAindexesMinor;
-	if (loc.genotypecall == AB) {
-	  idx = ABindexesMinor;
-	} else if (loc.genotypecall == BB) {
-	  idx = BBindexesMinor;
-	}
-	
-	//}
-
-      for (i=0; i < 3; ++i, ++idx) {
-	marginalLikes[i] = genolikes[ *idx ];
-      }
-      
-      int g = LIKES_TO_GENO(marginalLikes[0], marginalLikes[1], marginalLikes[2]);
-
-	
-      // this can be simplified... (mf is fixed...)
-      if (mf > 0.5) { // minor is unknown
-	if (g == AB) {
-	  bcfgenotypes[1] = bcf_gt_unphased(true);
-	} else if (g==BB) {
-	  bcfgenotypes[0] = bcf_gt_unphased(true);
-	  bcfgenotypes[1] = bcf_gt_unphased(true);
-	}
-
-	if (loc.genotypecall == AB) {
-	  bcfgenotypes[3] = bcf_gt_unphased(true);
-	  
-	  phredlikes[3] = KNOWN_PL;
-	  phredlikes[4] = 0;
-	  phredlikes[5] = KNOWN_PL;
-	} else if (loc.genotypecall == BB) {
-	  bcfgenotypes[3] = bcf_gt_unphased(true);
-	  bcfgenotypes[2] = bcf_gt_unphased(true);
-	  
-	  phredlikes[3] = KNOWN_PL;
-	  phredlikes[4] = KNOWN_PL;
-	  phredlikes[5] = 0;
-	} else {
-	  phredlikes[3] = 0;
-	  phredlikes[4] = KNOWN_PL;
-	  phredlikes[5] = KNOWN_PL;
-	}
-	  
-	logLikeToPL(marginalLikes, 3, phredlikes); // conditional PLs; the first 3
-
-	
-      } else {
-	
-	if (g == AB) {
-	  bcfgenotypes[3] = bcf_gt_unphased(true);
-	} else if (g==BB) {
-	  bcfgenotypes[2] = bcf_gt_unphased(true);
-	  bcfgenotypes[3] = bcf_gt_unphased(true);
-	}
-	
-	if (loc.genotypecall == AB) {
-	  bcfgenotypes[1] = bcf_gt_unphased(true);
-	  phredlikes[0] = KNOWN_PL;
-	  phredlikes[1] = 0;
-	  phredlikes[2] = KNOWN_PL;
-	  
-	} else if (loc.genotypecall == BB) {
-	  bcfgenotypes[1] = bcf_gt_unphased(true);
-	  bcfgenotypes[0] = bcf_gt_unphased(true);
-	    
-	  phredlikes[0] = KNOWN_PL;
-	  phredlikes[1] = KNOWN_PL;
-	  phredlikes[2] = 0;
-	} else {
-	  phredlikes[0] = 0;
-	  phredlikes[1] = KNOWN_PL;
-	  phredlikes[2] = KNOWN_PL;
-	}
-	  
-	logLikeToPL(marginalLikes, 3, phredlikes+3); // conditional PLs; the last 3
-      }
-    }
-
-
-
-    //bcf_update_info_float(hdr, rec, "AF", &(it->af), 1);
-
-    int32_t ad[3];
-    ad[0] = counts.refQuals.size();
-    ad[1] = counts.altQuals.size();
-    ad[2]=bcf_int32_vector_end;
-    bcf_update_info_int32(hdr, rec, "AD", ad, 2);
-    if (counts.otherQuals.size()) {
-      int32_t dp = counts.otherQuals.size();
-      bcf_update_info_int32(hdr, rec, "OTH", &dp, 1);
-    }
-    
-    
-    // cast into floats
-    for(i=0; i < N_GENOS; ++i)
-      genolikesf[i] = genolikes[i];
-
-    bcf_update_info_float(hdr, rec, "JL", genolikesf, N_GENOS);
-    
-    bcf_update_genotypes(hdr, rec, bcfgenotypes, 4);
-    bcf_update_format_int32(hdr, rec, "PL", phredlikes, 6);
-
-
-    int32_t genoQuals[2];
-    if (!opt.knowns || loc.genotypecall==NOCALL ) {
-      genoQuals[0] = getGQ(marginalLikes); // considers the three marginal likelihoods for id1
-      genoQuals[1] = getGQ(&(marginalLikes[3])); // and again, for id2
-    } else if (mf > 0.5) { // minor is unknown
-      genoQuals[0] = getGQ(marginalLikes);
-      genoQuals[1] = KNOWN_PL;
-    } else {
-      genoQuals[1] = getGQ(marginalLikes);
-      genoQuals[0] = KNOWN_PL;
-    }
-	     
-    bcf_update_format_int32(hdr, rec, "GQ", genoQuals, 2);
-    
-    if (bcf_write1(fp, hdr, rec) ) {
-      cerr << "Write error. That's not good." << endl;
-      exit(1);
-    }
-  }
-
-  bam_destroy1(b);
-  bam_hdr_destroy(header);
-  sam_close(in);
-  hts_idx_destroy(bamidx);
-  
-  bcf_destroy1(rec);
-  bcf_hdr_destroy(hdr);
-  
-  if (hts_close(fp))
-    cerr << "Failed to close " << opt.outVCF << endl;
-
-
-  if (file_format=="wb") {
-    if ( bcf_index_build3(opt.outVCF.c_str(), NULL,14,opt.numThreads))
-      cerr << "Some problem writing the B/VCF file index. That's not good!" << endl;
-  }
-
-  if (opt.knowns) {
-    closeVcfIterator(knownVcf);
-  }
-  closeVcfIterator(wgsPanel);
-}
 
 
 /*
@@ -2994,8 +2954,8 @@ writeTextReport(std::vector<MFest> &mfs, char mode, SampleStats &ss, Options &op
       outfile = new std::ofstream(outfileName);
     
       if (! ((std::ofstream*)outfile)->is_open()) {
-	cerr << "Failed to open " << outfileName << " for writing" << endl;
-	exit(1);
+		cerr << "Failed to open " << outfileName << " for writing" << endl;
+		exit(1);
       }
     }
     
@@ -3032,7 +2992,7 @@ writeTextReport(std::vector<MFest> &mfs, char mode, SampleStats &ss, Options &op
       }
     }
     
-    sprintf(buffer, "coverage\t%s%0.4f\nnsnps\t%s%u\n", x, ss.coverage, x, ss.nsnps);
+    sprintf(buffer, "coverage\t%s%0.4f\nsnpc\t%s%u\n", x, ss.coverage, x, ss.nsnps);
     *outfile << buffer;
     sprintf(buffer, "empirical_sequence_error\t%s%0.4f\nreported_sequencing_error\t%s%0.4f\n", x, ss.sequenceError, x, ss.sequencingError);
     *outfile << buffer;
@@ -3164,44 +3124,46 @@ main(int argc, char **argv) {
     if (opt.parseVcf) {
 
       if (mode == DEMIX) {// note the == Fst tags are not necessary when we are deconvolving the mixture...
-	if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, NULL, opt.maxFstD, opt.maxFstT)) ) {
-	  die(argv[0], "Failed to parse the vcf file ... ");
-	}
+		if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, NULL, opt.maxFstD, opt.maxFstT)) ) {
+		  die(argv[0], "Failed to parse the vcf file ... ");
+		}
       } else {
-	if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str(), opt.maxFstD, opt.maxFstT)) ) {
-	  die(argv[0], "Failed to parse the vcf file ... ");
-	}
+		if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, opt.fstTag.c_str(), opt.maxFstD, opt.maxFstT)) ) {
+		  die(argv[0], "Failed to parse the vcf file ... ");
+		}
       }
+	  
       results = new BaseCounter[ loci.size() ];
 
-      if (opt.knownBcf != NULL && opt.mixtureFraction < 0.) {
-	unsigned nrec = addKnowns(loci, opt.knownBcf, opt.knowns);
-	cerr << nrec << " known genotypes imported (from the low-fst panel)" << endl;
+      if (opt.knownBcf != NULL) {
+		  cerr << "Adding knowns..." << endl;
+		unsigned nrec = addKnowns(loci, opt.knownBcf, opt.knowns);
+		cerr << nrec << " known genotypes imported (from the low-fst panel)" << endl;
       }
       
     } else {
 
       // used for reading simulation data...
       if (! readBed(opt.bedFilename, loci, tmpResults, opt)) 
-	die(argv[0], "Failed to parse the bed file ... ");
+		die(argv[0], "Failed to parse the bed file ... ");
 
       
       if (tmpResults.size()) {
 
-	// may happen if some records have allele counts and others do not
-	if (tmpResults.size() != loci.size()) {
-	  die(argv[0], "Your bed file is malformed...");
-	}
-	
-	results=tmpResults.data(); //note: no need to free.
-	opt.numThreads=0; // kludge, but we use multithreading to parse the bam file.
-	// if I'm here, it means that a vector of counts was added to the bed file; hence no threads!
+		// may happen if some records have allele counts and others do not
+		if (tmpResults.size() != loci.size()) {
+		  die(argv[0], "Your bed file is malformed...");
+		}
+		
+		results=tmpResults.data(); //note: no need to free.
+		opt.numThreads=0; // kludge, but we use multithreading to parse the bam file.
+		// if I'm here, it means that a vector of counts was added to the bed file; hence no threads!
 
-	if (loci[0].genotypecall != NOCALL)
-	  opt.knowns=1; // treated as a flag, and an index to grab out of the vcf file
-	// if we're here, there's no VCF file to parse...
-      }
-      
+		if (loci[0].genotypecall != NOCALL)
+		  opt.knowns=1; // treated as a flag, and an index to grab out of the vcf file
+		// if we're here, there's no VCF file to parse...
+		}
+		  
     }
 
     
@@ -3211,19 +3173,19 @@ main(int argc, char **argv) {
       bam1_t *b = bam_init1();
       samFile *in = sam_open(opt.bamFilename, "r");
       if (in == NULL)
-	return -1;
+		return -1;
 
       initReferenceGenome(opt.bamFilename, in, opt.referenceFasta);
       
       sam_hdr_t *header = sam_hdr_read(in);
       if (header == NULL)
-	return -1;
+		return -1;
       
       hts_idx_t *idx;  // initiate a BAM index
       idx = sam_index_load(in, opt.bamFilename);   // second parameter is same as BAM file path
       if (idx == NULL) {
-	cerr << "Failed to load index" << endl;
-	return -1;
+		cerr << "Failed to load index" << endl;
+		return -1;
       }
 
 
@@ -3323,14 +3285,10 @@ main(int argc, char **argv) {
     writer.hdr=NULL;
     writer.results=results; // these are incremented when writing (todo)
     writer.loci = &loci;
-    
-    for (unsigned i =1 ; i < 23; ++i) {
       // todo; call writeVcfOneChrom instead; control results/loci accordingly. Note that writer has both.
-      writeOneChrom(opt, i, mf_hat, ss.sequenceError, &writer);
-    }
+	writeVcf(opt, mf_hat, ss.sequenceError, &writer);
     
     closeVcfWriter(writer, opt);
-
     
     if (!tmpResults.size())
       delete[] results;
