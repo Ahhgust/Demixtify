@@ -1,5 +1,14 @@
 # MF files!
 
+Of note, demixtify can use its own output as input (stdin). For example:
+
+```
+./demix DESCRIBE,DETECT -v lowfstPanel.5bpindelGap.10maf.0.05maxfst.biallelic.sites2include.fsts.bcf  -S - -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam | ./demix DEMIX -s /dev/stdin  -v GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf  -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam -V Deconvolution/2unk/asw_asw.NA19835_NA20340.20_10.gsa.bcf
+```
+
+Will both estimate the MP and then deconvolve the sample based on the estimate (note the sites involved need not overlap). 
+
+
 ## DETECT
 ```
 demix DETECT ...
@@ -13,7 +22,7 @@ Demixtify's DETECTion routine computes basic summary statistics on DESCRIBE (see
 | snpc   | The number of (usable) sites |
 | empirical_sequence_error | The mean sequence error rate, estimated (see doi.org/10.1016/j.fsigen.2023.102980) |
 | reported_sequencing_error | The mean sequence error rate, reported (from base qualities) |
-| mp_pointestimate  | The mixture proportion, estimated, maximum likelihood |
+| mp_pointestimate  | The most likley mixture proportion, estimated by maximum likelihood |
 | log_10_lr     | The log_10 likelihood ratio; 2 person vs 1 person. See also: -K/-k |
 | mp_lowerbound_0.010 | lower bound on mixture fraction, Chi square approximation. See also: -a | 
 | mp_upperbound_0.990 | and an upper bound ... |
@@ -46,8 +55,8 @@ Some notes:
   -  IE, there is some down-bias in the estimate as the MP becomes balanced.
 - While it is in [0, 1.0] in the case of a known contributor.
 
-<br>
-<br>
+
+
 ## mfPretty
 
 mfPretty.R is a legacy script meant to process the output from the original Demixtify (v0.1). <br>
