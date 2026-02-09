@@ -3,7 +3,7 @@
 Demixtify is a software suite for working with DNA mixtures. 
 
 ## Limitations
-- Demixtify is only for interpretting autosomal biallelic SNPs (as in, not indels).
+- Demixtify is only for interpretting *autosomal* biallelic SNPs (as in, not indels).
   * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-).
 - Demixtify is only for two-person mixtures.
   * Note in terms of mixture detection this may not be an issue (a 3 person sample is likely to be flagged as a mixture as well)
@@ -12,28 +12,50 @@ Demixtify is a software suite for working with DNA mixtures.
 ## Quick start
 
 Grab the static binary [here](binaries/x86_64/demix_static) <br>
-(at present, just the x86-64 UNIX version is available)
+(at present, just the x86-64 UNIX version is available). 
+
+### What it does
+- Demixtify first characterizes a sample (subcommands DETECT,DESCRIBE). It does so using a carefully curated set of markers.
+- Based on the result, Demixtify will then deconvolve the BAM into two profiles (subcommand DEMIX). Use whatever (SNP) markers you like.
+  -  If you wish to run GLIMPSE, a large panel is recommended
+  -  If you only wish to extract likelihoods, any ol' panel will do.
 
 ### Two unknowns
 
+In one line:
+```
+./demix DESCRIBE,DETECT -v lowfstPanel.5bpindelGap.10maf.0.05maxfst.biallelic.sites2include.fsts.bcf  -S - -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam | ./demix DEMIX -s /dev/stdin  -v GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf  -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam -V Deconvolution/2unk/asw_asw.NA19835_NA20340.20_10.gsa.bcf
+```
+Or as two separate commands (recommended):
+```
+./demix DESCRIBE,DETECT -v lowfstPanel.5bpindelGap.10maf.0.05maxfst.biallelic.sites2include.fsts.bcf  -S out.demix -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam
+./demix DEMIX -s out.demix -v GSA-24v3-0_A2.hg38.gnomadannos.autos.sites2include.justafs.bcf  -b SyntheticMixtures/asw_asw.NA19835_NA20340.20_10.bam -V Deconvolution/2unk/asw_asw.NA19835_NA20340.20_10.gsa.bcf
+```
+Where the first command is used to estimate the mixture proportion and the second deconvolves the samples. <br>
+The format of `out.demix` is described [here](DescribeAndDetect.md)
 
-### With a known contributor
+
+### Adding a known contributor
 add ``` -k knownContributor.bcf ``` to you command.
 `knownContributor.bcf` is assumed to be a single-sample BCF file. <br>
 If it's multisample, you can which individual using `-K index` (the index of the sample; defaults to 1, the 1st individual in the BCF)
+<br>
+Note: `-k` should be added to both the DETECT,DESCRIBE and to DEMIX
+
 
 ### Ultralow pass
-You gain precision by using more SNPs. You also gain bias unless those SNPs are "well behaved". 
+You gain precision by using more SNPs. You also gain bias unless those SNPs are "well behaved" (which these are not). <br>
+TL;DR <br>
+Single source samples may present as imbalanced mixtures with this panel. However, you may also detect balanced mixtures if the sample is information poor.
+For down-sampling, ~0.20x genomes and below may benefit from this panel. <br>
+ 
 
 
 
 ## Flags and options
 
-Demixtify has sensible defaults. Flags/options that may (reasonably) be varied are:
-```
--t nthreads (reads in the BAM file in parallel; maximum advisable value is 5)
-```
-<br>
+Demixtify has sensible defaults. Flags/options that may (reasonably) be varied include:
+
 
 ```
 -m min_mapping_quality (ignores reads with mapping quality < M; defaults to 20)
