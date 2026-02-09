@@ -4,43 +4,14 @@ Demixtify is a software suite for working with DNA mixtures.
 
 ### Limitations
 - Demixtify is only for interpretting autosomal biallelic SNPs (as in, not indels).
-  * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-), but the performance of splitting needs assessment.
-- Demixfity is only for deconvolving two-person mixtures.
-  * Note that a three-person mixture (in truth) will better fit the hypothesis of a two-person mixture than that of a single-source sample.
-- When deconvolving a very large number of sites, Demixtify can be a bit slow.
-  * (Blame htslib's seek function; future versions will just stream the data)
-- BCF Only
-  * Any input file needs to be *indexed* and in the *BCF* file format. .vcf.gz is not supported.
-  * (this, in my mind, is a bug in htslib)
+  * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-).
+- Demixtify is only for two-person mixtures.
+  * Note in terms of mixture detection, the two-person hypothesis will still provide better support than the single source hypothesis (in general)
 
-### Recommendations
-
-Demixtify (v0.20) has been submitted for publication. 
-
-- Either use
-  * Genotype imputation (GLIMPSE or Beagle 4.1 are recommended) OR
-    * EG, the output of Demixtify is the input to GLIMPSE
-    * In which case, you want to type a very LARGE number of SNPs
-  * Genotyping by maximum likelihood.
-    * In which case considering sites in an array is recommended.
-    * Filtering on the genotype quality is also recommended.
-- Use BQSR
-  * Demixtify is rather sensitive to biased base q-scores.
-  * Consider using BQSR
-    * [GATK](https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR)
-      * May not erase all signs of DNA damage
-    * [ATLAS](https://bitbucket.org/wegmannlab/atlas/src/master/)
-      * Largely untested and incredibly slow (sorry Daniel!)
-- Additionally
-  * When working with "balanced" mixtures (perhaps >1:3), you will get drop-out NOT at random.
-    * Really, you get drop-out depending on the genotype of the other contributor.
-    * This often presents as a "matchy" profile in tools like GEDmatch. (even without imputation).
-  * It should be stressed that genotype "accuracy" probably isn't the best metric to consider.
 
 ### Quick start
 
-Grab the static binary (at present, just the UNIX version is available),
-and the low-fst panel. See: [Panels](Panels/)
+Grab the static binary (at present, just the x86-64 UNIX version is available),
 
 
 For two unknown contributors
@@ -65,25 +36,7 @@ For one known contributor
 
 The `knownContributor.bcf` is assumed to be a single-sample BCF file. If it's multisample, you can specify -K (the index of the sample; defaults to 1, the 1st individual in the BCF)
 
-### Multicore support
 
-Demixtify can be distrubuted.
-<br>
-<br>
-
-```
-./demix -B -t 4 -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  (-k knownContributor.bcf) > MFfile.tsv
-```
-() are optional
--t specifyings 4 threads for reading the file.
-<br>
-Note the lack of output file (-o) forces Demixtify to assess the mixture fraction.
-You can then specify the mixture fraction a la:
-<br>
-<br>
-```
-./demix -B -F 0.1  -v SitesToGenotype.chr1.bcf  -b YOURBAM.bam -o YOURBAM.chr1.bcf  (-k knownContributor.bcf)
-```
 (and then use chromosome-level parallelism)
 
 ## Flags and options
