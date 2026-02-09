@@ -51,7 +51,10 @@ Single source samples may present as imbalanced mixtures with this panel. Howeve
 For down-sampling, ~0.20x genomes and below may benefit from this panel. <br>
 Likewise, disabling the theta correction is highly recommended (e.g., `-x 0.0`)
  
+## Output 
 
+The format of DESCRIBE and DEMIX are described [here](DescribeAndDetect.md)
+Information on the b/vcf file is described [here](Deconvolution.md)
 
 
 ## Flags and options

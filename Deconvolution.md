@@ -18,17 +18,17 @@ Only the canonical autosomes are supported (chr1-22). The VCF header also provid
 
 The INFO and FORMAT fields:
 -  AF
-  - ALT allele frequency
+   - ALT allele frequency
 -  JL
-  -  Joint genotype ln-likelihoods, unnormalized, in this order (Minor|Major): AA|AA,AA|AB,AA|BB,AB|AA, ... BB|BB
+   -  Joint genotype ln-likelihoods, unnormalized, in this order (Minor|Major): AA|AA,AA|AB,AA|BB,AB|AA, ... BB|BB
 -  AD
-  -  Allele Depth; Ref,Alt; filtered
+   -  Allele Depth; Ref,Alt; filtered
 -  OTH
-  -  Number of non-ref/alt bases; no annotation means 0
+   -  Number of non-ref/alt bases; no annotation means 0
 -  PL
-  -  Genotype likelihoods; Phred scaled, marginal *2 unknowns* or conditional *one genotype known a priori*
+   -  Genotype likelihoods; Phred scaled, marginal *2 unknowns* or conditional *one genotype known a priori*
 -  GQ
-  -  Genotype Quality; Phred scaled, taken as likelihood(genotype call is right)/likelihood(wrong)
+   -  Genotype Quality; Phred scaled, taken as likelihood(genotype call is right)/likelihood(wrong)
 
 The FILTER field
 -  CL
