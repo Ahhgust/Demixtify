@@ -7,7 +7,8 @@ Demixtify is a software suite for working with DNA mixtures.
   * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-).
 - Demixtify is only for two-person mixtures.
   * Note in terms of mixture detection this may not be an issue (a 3 person sample is likely to be flagged as a mixture as well)
-
+- The BAM file is single sample.
+  * Sample IDs are simply ignored.
 
 ## Quick start
 
@@ -48,6 +49,7 @@ You gain precision by using more SNPs. You also gain bias unless those SNPs are 
 TL;DR <br>
 Single source samples may present as imbalanced mixtures with this panel. However, you may also detect balanced mixtures if the sample is information poor.
 For down-sampling, ~0.20x genomes and below may benefit from this panel. <br>
+Likewise, disabling the theta correction is highly recommended (e.g., `-x 0.0`)
  
 
 
