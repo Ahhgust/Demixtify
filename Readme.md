@@ -2,42 +2,30 @@
 
 Demixtify is a software suite for working with DNA mixtures. 
 
-### Limitations
+## Limitations
 - Demixtify is only for interpretting autosomal biallelic SNPs (as in, not indels).
   * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-).
 - Demixtify is only for two-person mixtures.
-  * Note in terms of mixture detection, the two-person hypothesis will still provide better support than the single source hypothesis (in general)
+  * Note in terms of mixture detection this may not be an issue (a 3 person sample is likely to be flagged as a mixture as well)
 
 
-### Quick start
+## Quick start
 
-Grab the static binary (at present, just the x86-64 UNIX version is available),
+Grab the static binary [here](binaries/x86_64/demix_static) <br>
+(at present, just the x86-64 UNIX version is available)
 
-
-For two unknown contributors
-<br>
-<br>
-
-```
-./demix -B -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf > MFfile.tsv
-```
-
-For interpretting the MF-file, see [this](MFfile.md)
-Note that the -B option uses the base-quality scores; without it, Demixtify defaults to assuming a FIXED base quality.
+### Two unknowns
 
 
-For one known contributor
-<br>
-<br>
+### With a known contributor
+add ``` -k knownContributor.bcf ``` to you command.
+`knownContributor.bcf` is assumed to be a single-sample BCF file. <br>
+If it's multisample, you can which individual using `-K index` (the index of the sample; defaults to 1, the 1st individual in the BCF)
 
-```
-./demix -B -p LowFstPanel.BCF -v SitesToGenotype.bcf  -b YOURBAM.bam  -o Deconvolved.bcf -k knownContributor.bcf > MFfile.tsv
-```
-
-The `knownContributor.bcf` is assumed to be a single-sample BCF file. If it's multisample, you can specify -K (the index of the sample; defaults to 1, the 1st individual in the BCF)
+### Ultralow pass
+You gain precision by using more SNPs. You also gain bias unless those SNPs are "well behaved". 
 
 
-(and then use chromosome-level parallelism)
 
 ## Flags and options
 
