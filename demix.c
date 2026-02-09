@@ -3137,8 +3137,8 @@ main(int argc, char **argv) {
 
       if (opt.knownBcf != NULL) {
 
-		unsigned nrec = addKnowns(loci, opt.knownBcf, opt.knowns);
-		//cerr << nrec << " known genotypes imported (from the low-fst panel)" << endl;
+		addKnowns(loci, opt.knownBcf, opt.knowns);
+
       }
       
     } else {

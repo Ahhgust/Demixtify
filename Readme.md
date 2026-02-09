@@ -15,7 +15,7 @@ Demixtify is a software suite for working with DNA mixtures.
 
 ### Recommendations
 
-Demixtify (v0.2) is in active development. Use at your own risk.
+Demixtify (v0.20) has been submitted for publication. 
 
 - Either use
   * Genotype imputation (GLIMPSE or Beagle 4.1 are recommended) OR
