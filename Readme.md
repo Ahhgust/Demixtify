@@ -1,6 +1,6 @@
-# Biallelic mixture interpretation
-When working with forensic samples, one of the first questions to consider is whether or not a sample is a mixture. <br>
-Demixtify (v0.2) estimates the mixture fraction; using this mixture fraction, it then deconvolves the mixture.
+# Biallelic mixture deconvolution
+
+Demixtify is a software suite for working with DNA mixtures. 
 
 ### Limitations
 - Demixtify is only for interpretting autosomal biallelic SNPs (as in, not indels).
@@ -129,6 +129,10 @@ See description [here](https://broadinstitute.github.io/picard/explain-flags.htm
 <br>
 <br>
 
+## Legacy support
+
+The original demixtify (v.10) can be found on the "legacy" branch.
+See link [here](https://github.com/Ahhgust/Demixtify/tree/legacy)
 
 ## Exome sequencing
 
