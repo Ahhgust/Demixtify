@@ -77,16 +77,28 @@ mfPretty.R will make a tab separated file with the following:
 If the LLR > 0 the mixture hypothesis is more likely. If it's >6.635/2 (alpha=0.01, chi square, 1 degree of freedom), the mixture hypothesis is significantly more likely. The MF provides the estimated mixture fraction.
 
 
-## The mf.tsv file
-The raw TSV produced by demixtify is a little cumbersome. It's headerless and the last row is different from the rest.
+## demix (>0.10) interpretation
+`DETECT` provides several key summary statistics. Rather than considering the point estimate, instead consider the confidence region. <br>
+Rougly speaking if the region includes 0.0 (lower bound), then it may be single source AND <br>
+if the region includes values >0 (upper bound), it may be a mixture. <br>
+However, some mixtures are trivial. e.g., a 1% minor contributor is unlikely to impact genotyping. So even if the sample is "mixed", in practical terms that may not matter.
+Likewise, as the sample becomes very low coverage, demographic effects can cause the estimated fraction to be nonzero (but small). IE, false positives may become problematic. <br>
+In practice this is a much larger issue if you're working with <0.20x genomes, especially if you use the larger (10M) panel.
 
-| Column number |  What it means              |
-| ----------  |   -----------               |
-| 1 | The label; mf means we're estimating the mixture fraction, nsnps is estimating SNP properties |
-| 2 | For MF: the mixture fraction assessed ; for NSNPs, this is the estimated error rate  |
-| 3 | For MF: the corresponding log (base e) likelihood ; for NSNPs, this is the number of SNPs assayed |
+Here is *one* way to approach interpretation.
+Let's take two thresholds:
+E (effectively single source threshold) <br>
+  - This is something small. In this example, 5%
+  -  If the MP (upper-bound) is <5%
+     -  We treat the sample as if it were single source.
+D1 (deconvolution threshold on coverage, 1 unknown contributor)
+D2 (as with D1, but with 2 unknowns).
+-  D2 >> D1.
 
-## Interpretting mixture fractions/proportions
+
+
+## Legacy mixture interpretation (for demix v0.1)
+Interpretting mixture fractions/proportions
 Here's a simple framework for assessing the mixture proportion
 1. If the LLR does not (significantly) favor the mixture hypothesis
    - Stop; Congratulations, treat your sample as if it were single source.

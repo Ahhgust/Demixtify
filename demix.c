@@ -1869,7 +1869,7 @@ writeVcf(Options &opt, double mf, double error, VcfWriter *writer) {
 				exit(1);
 			}
 			std::string ochrom( it->region, 0, sPos);
-			cerr << "Writing " << ochrom << endl;
+			
 			bcf_hdr_append(writer->hdr, std::string("##contig=<ID="+ ochrom  + ">").c_str());		
 			if (chrom == "") // useful to know which chromosome is first...
 				thischrom=chrom=ochrom; 
@@ -3136,9 +3136,9 @@ main(int argc, char **argv) {
       results = new BaseCounter[ loci.size() ];
 
       if (opt.knownBcf != NULL) {
-		  cerr << "Adding knowns..." << endl;
+
 		unsigned nrec = addKnowns(loci, opt.knownBcf, opt.knowns);
-		cerr << nrec << " known genotypes imported (from the low-fst panel)" << endl;
+		//cerr << nrec << " known genotypes imported (from the low-fst panel)" << endl;
       }
       
     } else {
@@ -3214,8 +3214,8 @@ main(int argc, char **argv) {
 	  "Exiting..." << endl;
 	return 1;
       }
-      cout << opt.mixtureFraction << endl;
-      exit(1);
+
+
     }
     
     double mf_hat = opt.mixtureFraction;
@@ -3256,7 +3256,6 @@ main(int argc, char **argv) {
 	posthocDownsample(results, loci.size(), 1. - opt.desiredCoverage / ss.coverage);
 	// note we re-estimated coverage as the above is probabilistic.
 	ss.coverage=estimateCoverage(results, loci.size());
-	cerr << " new coverage " << ss.coverage << endl;
 	
 	// if the specified coverage is more than what's available...
       } else if (opt.desiredCoverage > ss.coverage + std::numeric_limits<double>::epsilon() ) {
@@ -3285,8 +3284,8 @@ main(int argc, char **argv) {
     writer.hdr=NULL;
     writer.results=results; // these are incremented when writing (todo)
     writer.loci = &loci;
-      // todo; call writeVcfOneChrom instead; control results/loci accordingly. Note that writer has both.
-	writeVcf(opt, mf_hat, ss.sequenceError, &writer);
+
+    writeVcf(opt, mf_hat, ss.sequenceError, &writer);
     
     closeVcfWriter(writer, opt);
     

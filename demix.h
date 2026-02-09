@@ -82,7 +82,7 @@ typedef struct {
 // New in this version:
 // Fst corrected genotype probability estiamtion
 // and the expanded likeilhood function (moving from formula 5 to formula 3 of Crysup & Woerner)
-#define VERSION "0.14"
+#define VERSION "0.15"
 
 
 const std::string DEFAULT_FST_TAG = "meanFst";
