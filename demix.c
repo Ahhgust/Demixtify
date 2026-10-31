@@ -73,6 +73,11 @@ ChisqTable CHISQ[] = {
 #define LIKES_TO_GENO(a,b,c) (a>=b&&a>=c) ? AA : ((c>=b&&c>=a) ? BB : AB)
 
 
+// let's you control template lengths
+// defaults s.t. very little gets filtered away
+#define DEFAULT_MIN_TLEN 30
+#define DEFAULT_MAX_TLEN 1000
+
 char summaryOutDefault[]="summary";
 
 using namespace std;
@@ -132,6 +137,8 @@ die(const char *arg0, const char *extra) {
     "\t-Q base_quality (maximum base quality; values truncated; empirical error is bounded by this). Default: " << DEFAULT_MAX_BASEQ << endl <<
     "\t-m mapping_quality (minimum mapping quality). Default: " << DEFAULT_MIN_MAPQ <<  endl <<
     "\t-L length (minimum read length). Default: " << DEFAULT_MIN_READLEN << endl <<
+    "\t-z minsiZe (minimum template length). Default: " << DEFAULT_MIN_TLEN << endl <<
+    "\t-Z maxsiZe (maximum template length). Default: " << DEFAULT_MAX_TLEN << endl <<    
     "\t-f read_filter (excludes reads according to SAM read filter flags). Default: 0x" << std::hex << DEFAULT_READ_FILTER << endl <<
     "\t-F read_include_filter (includes reads if all filters are met). Default: 0x" << std::hex << DEFAULT_READ_INCLUDE_FILTER  << endl <<
     "\t-B (tells this program to trust the quality scores; BQSR is highly recommended) " << endl <<
@@ -175,6 +182,8 @@ parseOptions(char **argv, int argc, Options &opt, char mode) {
 	opt.maxBaseQuality= DEFAULT_MAX_BASEQ; // BQ larger than this are set to this...
 	opt.minMapQuality=DEFAULT_MIN_MAPQ;
 	opt.minReadLength=DEFAULT_MIN_READLEN;
+	opt.minTemplateLength=DEFAULT_MIN_TLEN;
+	opt.maxTemplateLength=DEFAULT_MAX_TLEN;
 	opt.outVCF="";
 	opt.knowns=0;
 	opt.knownBcf=NULL;
@@ -245,6 +254,10 @@ parseOptions(char **argv, int argc, Options &opt, char mode) {
 	      opt.parseVcf=true;
 	    } else if (flag == 'L') {
 	      opt.minReadLength = max(atoi(argv[i]), 0);
+	    } else if (flag == 'z') {
+	      opt.minTemplateLength = max(atoi(argv[i]), 0);
+  	    } else if (flag == 'Z') {
+	      opt.maxTemplateLength = max(atoi(argv[i]), 0);
 	    } else if (flag == 'f') {
 	      opt.filter = atoi(argv[i]);
 	    } else if (flag == 'e') {
@@ -841,7 +854,7 @@ summarizeAllRegions(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, s
 
   int offset;
   uint32_t *cigar;
-  int64_t lpos, refPos, readPos, prevOp, lenCigBlock, op, len;
+  int64_t lpos, refPos, readPos, prevOp, lenCigBlock, op, len, tlen;
   
   int32_t lchromIndex; // chromosome indexes; loci must be sorted by chromIndex, position
   
@@ -867,6 +880,22 @@ typedef struct {
     }
     len = core.l_qseq; //length of the read.
     if (len < opt.minReadLength)
+      continue;
+
+    tlen = abs(core.isize); // sign reflects direction; we just want the length.
+    
+    // for our purposes, this is the right thing to do
+    // we may have single-end reads (post-read merging)
+    // in which case the tlen field is 0 (single end read)
+    // but the read length is the template length
+    // more generally, len should be a lower-bound on tlen,
+    // so let's enforce that bound.
+    if (tlen < len)
+      tlen=len;
+
+    if (tlen < opt.minTemplateLength)
+      continue;
+    else if (tlen > opt.maxTemplateLength)
       continue;
     
     uint32_t q2 = core.qual; //mapping quality
@@ -1074,7 +1103,7 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
   uint32_t tot=0;  
   int offset;
   uint32_t *cigar;
-  int refPos, readPos, prevOp, lenCigBlock, op, len;
+  int refPos, readPos, prevOp, lenCigBlock, op, len, tlen;
   unsigned cigInd;
   
   // associate each read NAME to a base-call and quality score
@@ -1118,9 +1147,12 @@ summarizeRegion(samFile *in, bam1_t *b, sam_hdr_t *header, hts_idx_t *idx, Locus
     uint8_t *s = bam_get_seq(b); //base string
     uint32_t q2 = core.qual ; //mapping quality
     uint8_t *qual = bam_get_qual(b); // quality string (need to +33 to convert to char)
-    
+
+    tlen = abs(core.isize); // sign reflects direction; we just want the length.
+    if (tlen < len)
+      tlen=len;
 	
-    if (len < opt.minReadLength || q2 < opt.minMapQuality) {
+    if (len < opt.minReadLength || q2 < opt.minMapQuality || tlen < opt.minTemplateLength || tlen > opt.maxTemplateLength) {
       if (! baddies.count(readname)) {
 	++count.badCount;
 	baddies.insert(readname);

@@ -110,6 +110,8 @@ typedef struct {
   unsigned maxBaseQuality;
   unsigned ngrid; // parameter sweep; how fine?
   int minReadLength; // bam spec. lens are signed ints
+  int minTemplateLength;
+  int maxTemplateLength;
   int numThreads;
   int knowns; // the INDEX of the known contributor in the VCF file (1-based)
   uint32_t filter; // SAM_FLAG filter

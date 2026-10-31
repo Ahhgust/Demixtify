@@ -32,8 +32,8 @@ The INFO and FORMAT fields:
 
 The FILTER field
 -  CL
-  -  Site provides conditional likelihood (1 known contributor AND they were genotyped) 
-  -  Marginal likelihoods are otherwise reported
+   -  Site provides conditional likelihood (1 known contributor AND they were genotyped) 
+   -  Marginal likelihoods are otherwise reported
 
 
 ### Notes on Genotypes

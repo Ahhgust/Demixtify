@@ -1,10 +1,10 @@
 # Biallelic mixture deconvolution
 
-Demixtify is a software suite for working with DNA mixtures. 
+Demixtify is a software suite for working with DNA mixtures. v0.15 introduced routines to estimate the mixture proportion (MP), while v0.20 provides deconvolution. 
 
 ## Limitations
 - Demixtify is only for interpretting *autosomal* biallelic SNPs (as in, not indels).
-  * Tri-/tetra-allelic SNPs can be split (bcftools norm -m-).
+  * Tri-/tetra-allelic SNPs can be split (`bcftools norm -m-`).
 - Demixtify is only for two-person mixtures.
   * Note in terms of mixture detection this may not be an issue (a 3 person sample is likely to be flagged as a mixture as well)
 - The BAM file is single sample.
@@ -93,9 +93,20 @@ Additional filters (using samflags)
 ```
 
 <br>
-See description [here](https://broadinstitute.github.io/picard/explain-flags.html) 
+See description of thes flags [here](https://broadinstitute.github.io/picard/explain-flags.html) 
 <br>
-<br>
+
+
+And different ways to treat base qualities
+```
+-B (tells this program to trust the quality scores; BQSR is highly recommended)
+-R (recalibrates base qualities; BQSR of some kind is highly recommended; implies -B)
+```
+
+Where -B uses the reported base qualities when estimating the MP and performing deconvolution; otherwise a the probability of a sequence error is assumed to be constant (`-q`). <br>
+-R uses the sequence error rate to recalibrate base qualities on the fly. The full effects of recalibrating this way needs better study, but if Demixtify reports 
+a substantial discordance between your reported base qualities and the empirical estimate of sequence error, -R may be recommended.
+
 
 ## Legacy support
 
