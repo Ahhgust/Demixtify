@@ -110,7 +110,7 @@ die(const char *arg0, const char *extra) {
     cerr << extra << endl;
   }
   
-  cerr << "Usage " << endl <<
+  cerr << "Usage (Demix Version) " << VERSION << endl <<
     arg0 << " MODE -b bamFile -v vcfFile.bcf (-k knownGenotypes.bcf) " << endl << endl <<
         "Possible modes are:" << endl << "DETECT,DESCRIBE,DEMIX" << endl << endl <<
     "Used to *detect* if a sample is a mixture" << endl <<

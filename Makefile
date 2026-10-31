@@ -12,7 +12,7 @@ CFLAGS=-Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer
 SYS := $(shell ${CC} -dumpmachine)
 
 # Here is the static compile command.
-# g++ -Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer demix.o -o demix_static -L/usr/lib64 htslib/libhts.a  -lz -lbz2 -llzma -lpthread -lm -ldeflate -static
+# g++ -Wall -std=c++11 -Ofast -DDEBUG=0 -fomit-frame-pointer demix.o -o demix_static -L/usr/lib64 htslib/libhts.a LIBS/*.a  -lz -lbz2 -lpthread -lm  -static
 # Note:
 # you need static libraries of everything. Centos/rocky linux makes that annoyingly hard.
 # See: https://forums.centos.org/viewtopic.php?t=52129

@@ -78,11 +78,10 @@ typedef struct {
 #define DEFAULT_AF -1
 #define MIN_AF 0.0001
 
-// 0.02 changes
 // New in this version:
 // Fst corrected genotype probability estiamtion
 // and the expanded likeilhood function (moving from formula 5 to formula 3 of Crysup & Woerner)
-#define VERSION "0.15"
+#define VERSION "0.15.1"
 
 
 const std::string DEFAULT_FST_TAG = "meanFst";
