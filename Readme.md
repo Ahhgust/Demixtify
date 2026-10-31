@@ -84,6 +84,16 @@ Demixtify has sensible defaults. Flags/options that may (reasonably) be varied i
 ```
 
 <br>
+
+```
+-z min_template_length (ignores reads whose inferred template length < z; default is 30)
+```
+
+```
+-Z max_template_length (ignores reads whose inferred template length > Z; default is 1000)
+```
+
+<br>
 <br>
 
 Additional filters (using samflags)
