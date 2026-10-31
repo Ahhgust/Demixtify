@@ -2908,11 +2908,16 @@ readDescribe(const char *filename, Options &opt) {
   double curMf, curLike, bestMf, nulLike, bestLike=-std::numeric_limits<double>::max();
   opt.mixtureFraction=bestMf=curMf=-1;
   nulLike = -std::numeric_limits<double>::max();
-  
-  bedFile.open(filename);
-  if (bedFile.fail()) 
-    return false;
 
+  // works with specifying either the bare filename or the prefix
+  bedFile.open(filename);
+  if (bedFile.fail()) {
+    std::string foo = std::string(filename) + ".mf";
+    bedFile.open(foo);
+    if (bedFile.fail()) 
+      return false;
+
+  }
   
   while (getline(bedFile, line)) {
 
