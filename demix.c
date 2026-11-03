@@ -1915,9 +1915,9 @@ writeVcf(Options &opt, double mf, double error, VcfWriter *writer) {
 	
 
     bcf_hdr_append(writer->hdr, "##FILTER=<ID=CL,Description=\"Site provides conditional likelihood\">");
-    bcf_hdr_append(writer->hdr, "##INFO=<ID=AF,Number=1,Type=Float,Description=\"ALT allele frequency\">");
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=AF,Number=A,Type=Float,Description=\"ALT allele frequency\">");
     bcf_hdr_append(writer->hdr, "##INFO=<ID=JL,Number=9,Type=Float,Description=\"Joint genotype ln-likelihoods, unnormalized, in this order (Minor|Major): AA|AA,AA|AB,AA|BB,AB|AA, ... BB|BB, \">");  
-    bcf_hdr_append(writer->hdr, "##INFO=<ID=AD,Number=2,Type=Integer,Description=\"Allele Depth; Ref,Alt; filtered\">");
+    bcf_hdr_append(writer->hdr, "##INFO=<ID=AD,Number=R,Type=Integer,Description=\"Allele Depth; Ref,Alt; filtered\">");
     bcf_hdr_append(writer->hdr, "##INFO=<ID=OTH,Number=1,Type=Integer,Description=\"Number of non-ref/alt bases; no annotation means 0\">");
   
     bcf_hdr_append(writer->hdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotypes\">");
@@ -3161,7 +3161,9 @@ main(int argc, char **argv) {
     if (opt.parseVcf) {
 
       if (mode == DEMIX) {// note the == Fst tags are not necessary when we are deconvolving the mixture...
-		if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, NULL, opt.maxFstD, opt.maxFstT)) ) {
+	// note less information is needed if we ONLY need to deconvolve. Let's strip out the AF requirement and set the max FST to 0 (so no FST anno needed)
+	//		if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, opt.AFtag, NULL, opt.maxFstD, opt.maxFstT)) ) {
+      	        if (NULL == (header= (bcf_hdr_t*)readPanel(opt.inBcf, loci, NULL, NULL, NULL, opt.maxFstD, 0)) ) {
 		  die(argv[0], "Failed to parse the vcf file ... ");
 		}
       } else {
@@ -3541,8 +3543,10 @@ readPanel(const char *fname, vector<Locus> &loci, BaseCounter *results, const ch
 
     if (bcf_is_snp(rec) && rec->n_allele == 2) {
       Locus loc;      
-      // returns >= on success..
-      if (bcf_get_info_float(hdr, rec, AFtag, &af, &naf) < 0) {
+
+      if (AFtag==NULL) {
+	loc.af=DEFAULT_AF;
+      } else if (bcf_get_info_float(hdr, rec, AFtag, &af, &naf) < 0) {       // returns >= on success..
 	continue;
       } else {
 	loc.af= af[0];
