@@ -5,8 +5,8 @@ All notable changes to Demixtify are recorded in this document.
 ## Post-publication
 ### 11/03
 Small quality of life improvements
--- fixed htslib warnings (for AD and AF fields). They were "correct", but atypical.
--- AF and FST tags are no longer needed when you're DEMIX-ing (only applies when DEMIX is run in isolation)
+- fixed htslib warnings (for AD and AF fields). They were "correct", but atypical.
+- AF and FST tags are no longer needed when you're DEMIX-ing (only applies when DEMIX is run in isolation)
 
 	
 ### 10/31
