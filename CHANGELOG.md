@@ -5,13 +5,13 @@ All notable changes to Demixtify are recorded in this document.
 ## Post-publication
 ### 11/03
 Small quality of life improvements
-	- fixed htslib warnings (for AD and AF fields). They were "correct", but atypical.
-	- AF and FST tags are no longer needed when you're DEMIX-ing (only applies when DEMIX is run in isolation)
-	
+-- fixed htslib warnings (for AD and AF fields). They were "correct", but atypical.
+-- AF and FST tags are no longer needed when you're DEMIX-ing (only applies when DEMIX is run in isolation)
+
 	
 ### 10/31
 Add the ability to filter (drop reads) based on their (inferred) template length <br>
-. Since I'm using up the alphabet (ie, all the flags) a bit too quickly, use: <br>
+Since I'm using up the alphabet (ie, all the flags) a bit too quickly, use: <br>
 	
 ```-z minTlenSize```
 ```-Z maxTlenSize```
