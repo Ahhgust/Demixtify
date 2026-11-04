@@ -1,6 +1,21 @@
 # Biallelic mixture deconvolution
 
-Demixtify is a software suite for working with DNA mixtures. v0.15 introduced routines to estimate the mixture proportion (MP), while v0.20 provides deconvolution. 
+Demixtify is a software suite for working with DNA mixtures. v0.15 introduced routines to estimate the mixture proportion (MP) as well as deconvolution.
+
+## Citeme
+### Deconvolution
+doi.org/10.1016/j.fsigen.2026.103624 <br>
+Woerner AE. Deconvolving DNA mixtures with Demixtify. Forensic Science International: Genetics. 2026 Sep 18:103624.
+
+### Mixture proportion estimation
+doi.org/10.1016/j.fsigen.2026.103451 <br>
+Woerner AE, Crysup B, Coble MD. Characterizing DNA mixtures with Demixtify. Forensic Science International: Genetics. 2026 Jun 1;84:103451.
+
+### Old-school Demixtify (no confidence intervals; no theta-correction)
+doi.org/10.1016/j.fsigen.2026.103451 <br>
+Woerner AE, Crysup B, King JL, Novroski NM, Coble MD. Mixture detection with Demixtify. Forensic Science International: Genetics. 2024 Mar 1;69:102980.
+
+
 
 ## Limitations
 - Demixtify is only for interpretting *autosomal* biallelic SNPs (as in, not indels).

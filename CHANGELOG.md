@@ -3,7 +3,11 @@
 All notable changes to Demixtify are recorded in this document.
 
 ## Post-publication
-### 11/03
+### 11/04/26
+- Added a Windows binary (64-bit); using Msys2
+- Added citation information
+
+### 11/03/26
 Small quality of life improvements
 - fixed htslib warnings (for AD and AF fields). They were "correct", but atypical.
 - AF and FST tags are no longer needed when you're DEMIX-ing (only applies when DEMIX is run in isolation)
